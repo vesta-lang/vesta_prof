@@ -49,6 +49,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import emit_table  # noqa: E402
 from sdm import pages  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -503,6 +504,16 @@ def main():
     if args.check and differs(path, text):
         stale.append(path)
     print("  %-28s" % "index.h")
+
+    # Y la MISMA informacion como datos recorribles.  Sale de la misma pasada a
+    # proposito: son las dos caras del mismo dato, y generarlas por separado es
+    # como se acaba con una que dice una cosa y otra que dice otra.
+    tpath = os.path.join(OUT_DIR, "table.c")
+    ttext = emit_table.cpuid_table_c("intel", unique,
+                                     "tools/gen_cpuid_index.py")
+    if emit_table.write_if_changed(tpath, ttext, args.dry_run) and args.check:
+        stale.append(tpath)
+    print("  %-28s %4d" % ("table.c", len(unique)))
 
     if args.report:
         print()

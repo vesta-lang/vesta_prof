@@ -51,6 +51,10 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import emit_table  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_DIR = os.path.join(ROOT, "common", "msr", "amd")
 
@@ -343,6 +347,20 @@ def main():
     if args.check and differs(path, text):
         stale.append(path)
     print("  %-28s" % "index.h")
+
+    # Y la misma informacion como datos recorribles.  NINGUNO lleva puerta:
+    # el PPR de AMD no da la condicion de CPUID al lado de la declaracion,
+    # como si hace el SDM en su tabla de arquitectonicos.  Que no la lleven
+    # no dice que no exista, dice que por esta via no se sabe -- y son dos
+    # cosas distintas que hay que poder distinguir.
+    rows = [{"addr": e["addr"], "name": "AMD_" + e["name"]}
+            for e in unique]
+    tpath = os.path.join(OUT_DIR, "table.c")
+    ttext = emit_table.msr_table_c("amd", rows,
+                                   "tools/gen_amd_msr_index.py")
+    if emit_table.write_if_changed(tpath, ttext, args.dry_run) and args.check:
+        stale.append(tpath)
+    print("  %-28s %4d" % ("table.c", len(rows)))
 
     if args.report:
         print()

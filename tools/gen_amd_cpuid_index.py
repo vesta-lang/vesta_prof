@@ -55,6 +55,10 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import emit_table  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_DIR = os.path.join(ROOT, "common", "cpuid", "amd")
 
@@ -120,6 +124,29 @@ BITS_HEADER = re.compile(
 
 # La celda de la columna de registro, cuando la tabla la trae.
 REG_CELL = re.compile(r"^E([A-D])X$")
+
+# El manual declara la subhoja en la prosa del titulo: `... (ECX=62)`.
+SUB_DECL = re.compile(r"\(ECX\s*=\s*(\d+)\)")
+
+
+def subleaf_value(token):
+    """El numero de subhoja que hay detras de un sufijo `_xNN`.
+
+    La notacion del manual es AMBIGUA y no se puede resolver por si sola:
+    escribe `_x11` para la subhoja 11 y `_x3E` para la 62, o sea decimal cuando
+    cabe en decimal y hexadecimal cuando hace falta.  `_x10` querria decir 10 o
+    16 y no habria forma de saberlo mirando el token.
+
+    Asi que se lee decimal si son todo cifras y hexadecimal si lleva letra --
+    que acierta en los seis casos donde el manual declara el valor -- y ADEMAS
+    se contrasta contra esa declaracion cuando la hay.  La regla sola seria una
+    suposicion; contrastada es un hecho, y el dia que aparezca un `_x10` el
+    contraste lo dira en vez de callarlo.
+    """
+    if re.match(r"^[0-9]+$", token):
+        return int(token, 10)
+    return int(token, 16)
+
 
 # Una fila de campo empieza por su rango de bits.
 BITS = re.compile(r"^\s*(\d+)(?::(\d+))?\s")
@@ -207,6 +234,7 @@ def collect(pages_text):
     unnamed = []
     badrange = []   # rangos de verdad malformados: los limites al reves
     notrow = []     # lo que no era una fila de bits: paginas, otras tablas
+    ambiguous = []  # sufijos `_xNN` que no cuadran con lo que declara el manual
     leaf = None
     reg = None
     name_col = None
@@ -214,6 +242,7 @@ def collect(pages_text):
     desc_col = None
     reg_col = None
     sub = ""
+    sub_num = None
     # Reservados que una cabecera multi-registro da por buenos MIENTRAS no
     # aparezca una tabla que los desmienta.  Ver donde se llenan.
     pending = []
@@ -229,12 +258,18 @@ def collect(pages_text):
 
                 leaf = int(m.group(1) + m.group(2), 16)
                 suffix = m.group(3)
+                # El manual declara a veces la subhoja en la prosa del titulo,
+                # `... (ECX=62)`.  Cuando lo hace, manda ella: es la unica
+                # forma de resolver que `_x11` es 11 y `_x3E` es 62.
+                d = SUB_DECL.search(m.group(4))
+                declared = int(d.group(1)) if d else None
                 reg = None
                 name_col = None
                 bits_col = None
                 desc_col = None
                 reg_col = None
                 sub = ""
+                sub_num = None
 
                 s = SUF_MULTI.match(suffix)
                 if s:
@@ -255,12 +290,19 @@ def collect(pages_text):
                     t = SUF_SUB.match(rest)
                     if t and t.group(1):
                         sub = "_x%s" % t.group(1)
+                        sub_num = subleaf_value(t.group(1))
+                        if declared is not None and sub_num != declared:
+                            skipped["subhoja_ambigua"] = skipped.get(
+                                "subhoja_ambigua", 0) + 1
+                            ambiguous.append((leaf, sub, sub_num,
+                                              declared))
+                            sub_num = declared
                     # Y el hueco se anota CON su subhoja.  Sin ella declaraba
                     # reservado el registro entero de la hoja, pisando los
                     # campos reales de las demas subhojas.
                     pending = [{
                         "leaf": leaf, "reg": "E%sX%s" % (r, sub),
-                        "hi": 31, "lo": 0,
+                        "hi": 31, "lo": 0, "sub": sub_num,
                         "name": "RESERVED_31_0", "hole": 1,
                     } for r in re.findall(r"[A-D]", s.group(1))]
                     continue
@@ -275,6 +317,13 @@ def collect(pages_text):
                     t = SUF_SUB.match(rest)
                     if t and t.group(1):
                         sub = "_x%s" % t.group(1)
+                        sub_num = subleaf_value(t.group(1))
+                        if declared is not None and sub_num != declared:
+                            skipped["subhoja_ambigua"] = skipped.get(
+                                "subhoja_ambigua", 0) + 1
+                            ambiguous.append((leaf, sub, sub_num,
+                                              declared))
+                            sub_num = declared
                         reg = reg + sub
                     continue
 
@@ -287,6 +336,13 @@ def collect(pages_text):
                 if t:
                     if t.group(1):
                         sub = "_x%s" % t.group(1)
+                        sub_num = subleaf_value(t.group(1))
+                        if declared is not None and sub_num != declared:
+                            skipped["subhoja_ambigua"] = skipped.get(
+                                "subhoja_ambigua", 0) + 1
+                            ambiguous.append((leaf, sub, sub_num,
+                                              declared))
+                            sub_num = declared
                     continue
 
                 # Sufijo que no se reconoce.  Se cuenta: si esto sube, es que
@@ -420,6 +476,7 @@ def collect(pages_text):
                 fields.append({
                     "leaf": leaf, "reg": reg, "hi": hi, "lo": lo,
                     "name": "RESERVED_%d_%d" % (hi, lo), "hole": 1,
+                    "sub": sub_num,
                 })
                 continue
             # Nombres con guion -- `SEV-SNP`, `SEV-ES` -- o con barra -- `U/S`,
@@ -438,14 +495,14 @@ def collect(pages_text):
 
             fields.append({
                 "leaf": leaf, "reg": reg, "hi": hi, "lo": lo,
-                "name": token, "hole": 0,
+                "name": token, "hole": 0, "sub": sub_num,
                 "manual_name": original if original != token else None,
             })
 
     # La ultima hoja del manual no tiene ninguna detras que cierre su pendiente.
     fields.extend(pending)
 
-    return fields, skipped, unnamed, badrange, notrow
+    return fields, skipped, unnamed, badrange, notrow, ambiguous
 
 
 def macro_of(f):
@@ -604,7 +661,8 @@ def main():
         print("gen_amd_cpuid_index: %s" % exc, file=sys.stderr)
         return 1
 
-    fields, skipped, unnamed, badrange, notrow = collect(pages_text)
+    fields, skipped, unnamed, badrange, notrow, ambiguous = collect(
+        pages_text)
     unique, conflicting = dedupe(fields)
 
     grouped = {}
@@ -627,6 +685,15 @@ def main():
           % (skipped["sin_nombre"], skipped["sin_hoja"], skipped["rango_malo"]))
     print("no eran filas de bits:   %d  (numeros de pagina y encabezados)"
           % skipped.get("no_es_fila", 0))
+    # La notacion `_xNN` del manual es ambigua y se resuelve por una regla.
+    # Cuando el manual ADEMAS declara el valor y no coincide, manda el manual y
+    # se dice: una regla que acierta hoy puede dejar de acertar, y callarlo
+    # seria numerar mal una subhoja sin que nada avisara.
+    print("subhojas contrastadas:   %d discrepan de lo que declara el manual"
+          % len(ambiguous))
+    for leaf, tok, guess, decl in ambiguous:
+        print("   Fn%08X%s: la regla dice %d, el manual %d -- manda el manual"
+              % (leaf, tok, guess, decl))
     print()
 
     stale = []
@@ -643,6 +710,18 @@ def main():
     if args.check and differs(path, text):
         stale.append(path)
     print("  %-28s" % "index.h")
+
+    # Y la misma informacion como datos recorribles.  El registro lleva la
+    # subhoja pegada en el nombre de la macro (`EAX_x11`) porque asi es como
+    # se busca en el manual, pero en la tabla van SEPARADOS: un programa que
+    # la recorra necesita el numero para poner ECX, no una cadena.
+    flat = [dict(f, reg=f["reg"].split("_")[0]) for f in unique]
+    tpath = os.path.join(OUT_DIR, "table.c")
+    ttext = emit_table.cpuid_table_c("amd", flat,
+                                     "tools/gen_amd_cpuid_index.py")
+    if emit_table.write_if_changed(tpath, ttext, args.dry_run) and args.check:
+        stale.append(tpath)
+    print("  %-28s %4d" % ("table.c", len(flat)))
 
     if args.report:
         print()

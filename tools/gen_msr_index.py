@@ -51,6 +51,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import emit_table  # noqa: E402
 from sdm import pages  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -648,6 +649,22 @@ def main():
     if args.check and differs(path, text):
         stale.append(path)
     print("  %-28s" % "index.h")
+
+    # Y la misma informacion como datos recorribles.  Aqui va la direccion,
+    # el nombre y la PUERTA; los campos de bits de dentro no, porque el
+    # manual los da como prosa y no como identificadores -- son otro
+    # artefacto y todavia no se han extraido.
+    rows = [{"addr": e["base"], "name": e["name"],
+             "indexed": e["kind"] == "indexed",
+             "gate": None if not e.get("gate") else (
+                 e["gate"]["leaf"], e["gate"]["sub"], e["gate"]["reg"],
+                 e["gate"]["lo"], e["gate"]["hi"] - e["gate"]["lo"] + 1)}
+            for e in unique]
+    tpath = os.path.join(OUT_DIR, "table.c")
+    ttext = emit_table.msr_table_c("intel", rows, "tools/gen_msr_index.py")
+    if emit_table.write_if_changed(tpath, ttext, args.dry_run) and args.check:
+        stale.append(tpath)
+    print("  %-28s %4d" % ("table.c", len(rows)))
 
     if args.report:
         print()
