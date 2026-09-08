@@ -18,12 +18,19 @@ sale de una tabla de latencias y puertos por microarquitectura.
 ```
 
 Este directorio mide lo mismo que la tabla afirma, sobre la pieza que tienes
-delante. De ahi salen dos usos, y el segundo es el que no cubre nadie mas:
+delante, **para comprobarla**. No para sustituirla: construir tablas de coste es
+el trabajo de uops.info, se hace con automatizacion y con mucho hardware, y no se
+rehace aqui.
 
-- una microarquitectura que nadie ha publicado: se mide y ya hay tabla;
-- una microarquitectura que **si** esta publicada: se mide y se sabe cuanto se
-  aparta la tabla de esta maquina. Esa diferencia es la que separa *"este codigo
-  va lento"* de *"el modelo miente"*.
+Comprobarla no es un lujo, porque entre la tabla y la maquina hay siempre una
+suposicion. La tabla dice `intel-alderlake-p`; la maquina puede ser un Raptor
+Lake, bajo un hipervisor, con menos contadores de los que la pieza tiene. Que esa
+tabla la describa se da por hecho hasta que alguien lo mide.
+
+Y importa porque el residuo se usa para **ordenar**. Ante una lista de "ciclos
+inexplicados", la primera pregunta razonable es *"¿como sabes que la parte
+explicada esta bien?"*. Tener por respuesta una medida en la maquina de quien
+pregunta no es lo mismo que decir que lo pone en una tabla.
 
 ## Necesita el driver cargado
 

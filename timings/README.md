@@ -37,16 +37,23 @@ comparar en vez de dar desvios sin sentido.
 
 ## Lo que hay, y lo que falta
 
-Solo estan las microarquitecturas para las que hace falta una tabla. Falta una
-la primera vez que alguien perfila en una pieza que no esta, y eso **no es un
-fallo que haya que tapar**: se dice, la columna del residuo queda sin valor -- que
-no es lo mismo que cero -- y se puede medir con `vxp_calib`, que para eso existe.
+Solo estan las microarquitecturas para las que hace falta una tabla aqui. Que
+falte una casi siempre quiere decir que falta el FICHERO, no la tabla: el
+pipeline del compilador cubre trece piezas desde uops.info -- las dos clases de
+nucleo de las hibridas incluidas -- y rellena varias mas desde los modelos de
+LLVM. Lo primero que hay que mirar es si ya existe.
 
-Lo que nunca se hace es sustituir una tabla por la de otra pieza parecida. Los
-numeros de un nucleo P no describen uno E: en la maquina de desarrollo, la misma
-`imul` tarda 3 ciclos en uno y 5 en el otro, y la primera cache responde en 5 y
-en 3 respectivamente. Rellenar con la tabla del vecino da un residuo que parece
-una respuesta.
+Que falte de verdad es raro: silicio nuevo que nadie ha publicado todavia, o una
+pieza que ninguna de las dos fuentes cubre. Entonces **se dice**: la columna del
+residuo queda sin valor -- que no es lo mismo que cero -- y quien lo necesite puede
+medir una forma concreta con `vxp_calib`. Lo que no se hace es construir una
+tabla a mano: eso es el trabajo de uops.info y no se rehace.
+
+Y lo que no se hace **nunca** es sustituir una tabla por la de otra pieza
+parecida. Los numeros de un nucleo P no describen uno E: en la maquina de
+desarrollo, la misma `imul` tarda 3 ciclos en uno y 5 en el otro, y la primera
+cache responde en 5 y en 3 respectivamente. Rellenar con la tabla del vecino da
+un residuo que parece una respuesta.
 
 ## El formato
 
