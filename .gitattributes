@@ -38,6 +38,15 @@ Kbuild        text eol=lf
 # una herramienta que analiza linea a linea: no es sitio para depender de eso.
 *.def         text eol=lf
 
+# Las tablas de coste por microarquitectura.  Mismo caso que el `.def` y por el
+# mismo motivo: un analizador que va campo a campo dentro de la linea.  Hoy el
+# lector de `user/vxarch.c` sobrevive a un CRLF porque los campos que interpreta
+# terminan en barra o en un caracter que no es digito, pero eso es suerte y no
+# diseno -- basta anadir un campo al final de una linea para que el `\r` se meta
+# dentro de un valor, y un coste con basura pegada no da un error, da otro
+# numero.
+*.vxarch      text eol=lf
+
 # --- Y estos, con los de Windows ------------------------------------------
 #
 # El sentido contrario, que es menos conocido.  `cmd.exe` lee los `.bat`/`.cmd`

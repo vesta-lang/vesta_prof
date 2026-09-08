@@ -314,6 +314,28 @@ if (VXP_BUILD_TESTS)
     endif ()
     add_test(NAME counter COMMAND test_counter)
 
+    # El lector de `.vxarch`, la tabla de coste por microarquitectura que trae
+    # el compilador.
+    #
+    # Se ejercita SIN el fichero de 300 KB: el analizador toma bytes y no una
+    # ruta, asi que cuatro lineas escritas en el test recorren el mismo codigo.
+    # Eso es lo que permite comprobar lo que un fichero real no contiene -- una
+    # version del futuro, una clase que no cabe -- y sobre todo las COLUMNAS,
+    # que es donde un error se disfraza de numero razonable.
+    add_executable(test_vxarch
+            tests/test_vxarch.c
+            user/vxarch.c)
+    target_link_libraries(test_vxarch PRIVATE vxp_base)
+    target_include_directories(test_vxarch PRIVATE user)
+    set_target_properties(test_vxarch PROPERTIES
+            C_STANDARD 11 C_STANDARD_REQUIRED ON)
+    if (MSVC)
+        target_compile_options(test_vxarch PRIVATE /W4)
+    else ()
+        target_compile_options(test_vxarch PRIVATE -Wall -Wextra -pedantic-errors)
+    endif ()
+    add_test(NAME vxarch COMMAND test_vxarch)
+
 
     # Y el volcado como binario, que es para lo que sirve: pegarlo en un informe
     # de fallo o comparar dos maquinas.  Sin privilegios, asi que los MSR salen
@@ -331,6 +353,36 @@ if (VXP_BUILD_TESTS)
         target_compile_options(vxp_dump PRIVATE /W4)
     else ()
         target_compile_options(vxp_dump PRIVATE -Wall -Wextra -pedantic-errors)
+    endif ()
+
+    # Lo que cuestan las instrucciones de ESTA maquina, y cuanto se aparta de
+    # ellas la tabla de coste del compilador.
+    #
+    # Es la unica herramienta del arbol que NO construyen los tres compiladores,
+    # y esta razonado: lo que mide ES una secuencia exacta de instrucciones, asi
+    # que va en ensamblador, y la sintaxis es la de GNU.  MSVC quiere MASM.
+    # Escribir los nucleos dos veces serian dos versiones de una medida, que es
+    # peor que una medida que no todos puedan construir.
+    #
+    # Necesita el driver cargado para correr: leer un contador desde modo usuario
+    # exige `CR4.PCE`.  Sin el, muere con una excepcion de instruccion
+    # privilegiada, que es la forma correcta de fallar.
+    if (NOT MSVC)
+        enable_language(ASM)
+        add_executable(vxp_calib
+                calib/main.c
+                user/vxarch.c
+                common/asm/x86_64/calib_kernels.S)
+        target_link_libraries(vxp_calib PRIVATE vxp_base)
+        # El `.S` pasa por el preprocesador -- eso significa la mayuscula -- y de
+        # ahi saca las cuentas de `calib.h`, que son las MISMAS que usa el lado
+        # de C.  Dos copias de esos numeros no fallarian: dividirian por lo que
+        # no es y publicarian una latencia de aspecto plausible.
+        target_include_directories(vxp_calib PRIVATE common include user)
+        set_target_properties(vxp_calib PROPERTIES
+                C_STANDARD 11 C_STANDARD_REQUIRED ON)
+        target_compile_options(vxp_calib PRIVATE
+                $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -pedantic-errors>)
     endif ()
 
     if (WIN32)
