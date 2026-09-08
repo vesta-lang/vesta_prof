@@ -60,3 +60,11 @@ memset
 memcpy
 memmove
 memcmp
+
+; El manejador de lenguaje del manejo de excepciones de x64.  No lo llama
+; ningun fuente nuestro: lo nombra la directiva `.seh_handler` de
+; `asm/x86_64/msr_guard.S`, y es quien recorre la tabla de ambitos cuando algo
+; falla dentro de la ventana guardada.  Sin el, la lectura protegida de MSR no
+; enlaza -- y ese es el buen modo de fallar: se entera al construir quien
+; quisiera usarla sin tener donde apoyarla.
+__C_specific_handler
