@@ -6,8 +6,37 @@
  */
 
 /**
- * @file pmu_caps.c
- * @brief La deteccion del PMU, sin una sola cabecera del sistema operativo.
+ * @file probe/pmu_caps.c
+ * @brief
+ * \~english PMU detection, without a single operating system header.
+ * \~spanish La deteccion del PMU, sin una sola cabecera del sistema operativo.
+ * \~
+ *
+ * \~english
+ * THE ORDER IN WHICH IT ASKS, which is the whole design:
+ *
+ *      CPUID  ->  what the part ANNOUNCES        cheap, no privileges,
+ *        |                                       and a hypervisor can lie
+ *        v
+ *      MSR    ->  what the register SAYS         ring 0 only, and it is
+ *        |                                       the authoritative word
+ *        v
+ *      verdict -> where the two are compared
+ *
+ * Including nothing from the system is what allows compiling this file ALSO in
+ * user space and testing it with a make-believe `msr_read`, instead of debugging
+ * it by loading it into a machine and seeing whether it hangs.
+ *
+ * \~spanish
+ * EL ORDEN EN QUE PREGUNTA, que es todo el diseno:
+ *
+ *      CPUID  ->  lo que la pieza ANUNCIA        barato, sin privilegios,
+ *        |                                       y un hipervisor puede mentir
+ *        v
+ *      MSR    ->  lo que el registro DICE        solo anillo cero, y es la
+ *        |                                       palabra autorizada
+ *        v
+ *      veredicto -> donde se comparan las dos
  *
  * Que no incluya nada del sistema es lo que permite compilar este fichero
  * TAMBIEN en espacio de usuario y probarlo con un `msr_read` de mentira, en vez
@@ -16,20 +45,32 @@
 
 #include "pmu_caps.h"
 
-#include "cpuid_intrin.h"
-#include "msr.h"
+#include "cpuid/intrin.h"
+#include "msr/access.h"
 #include "writer.h"
 
 /* -------------------------------------------------------------------------
+ *  \~english
+ *  Local utilities.
+ *
+ *  `static` because the file is the module's boundary, and written by hand
+ *  because there is no standard library in the kernel: `memset` and `snprintf`
+ *  cannot be called.  And even if they could, having them here is what makes the
+ *  user-space tests exercise EXACTLY the code that runs inside.
+ *
+ *  \~spanish
  *  Utilidades locales.
  *
  *  `static` porque el fichero es la frontera del modulo, y escritas a mano
- *  porque en kernel no hay biblioteca estandar: no se puede llamar a `memset`
- *  ni a `snprintf`.  Y aunque se pudiera, tenerlas aqui es lo que hace que las
+ *  porque en kernel no hay biblioteca estandar: no se puede llamar a `memset` ni
+ *  a `snprintf`.  Y aunque se pudiera, tenerlas aqui es lo que hace que las
  *  pruebas de usuario ejerciten EXACTAMENTE el codigo que corre dentro.
+ *  \~
  * ------------------------------------------------------------------------- */
 
-/** @brief Pone `n` bytes a cero. */
+/** @brief
+ *  \~english Zeroes `n` bytes.
+ *  \~spanish Pone `n` bytes a cero. \~ */
 static void zero_bytes(void *p, usize n) {
     u8 *b = (u8 *)p;
     usize i;
@@ -38,7 +79,9 @@ static void zero_bytes(void *p, usize n) {
     }
 }
 
-/** @brief Anade un `msr_value`: el numero, o por que no se pudo leer. */
+/** @brief
+ *  \~english Appends an `msr_value`: the number, or why it could not be read.
+ *  \~spanish Anade un `msr_value`: el numero, o por que no se pudo leer. \~ */
 static void put_msr(writer *w, const msr_value *m, int digits) {
     if (m->rc == OK) {
         put_hex(w, m->value, digits);
@@ -56,15 +99,24 @@ static void put_msr(writer *w, const msr_value *m, int digits) {
 }
 
 /* -------------------------------------------------------------------------
- *  Deteccion.
+ *  \~english  Detection.
+ *  \~spanish  Deteccion.
+ *  \~
  * ------------------------------------------------------------------------- */
 
-/** @brief Fabricante, de la hoja 0.  Decide que MSR tienen sentido. */
+/** @brief
+ *  \~english Vendor, from leaf 0.  It decides which MSRs make sense.
+ *  \~spanish Fabricante, de la hoja 0.  Decide que MSR tienen sentido. \~ */
 static u32 detect_vendor(void) {
-    /* La deteccion vive en `cpuid_intrin.h`: es CPUID puro y la necesita
-     * tambien el volcado.  `cpu_vendor` y `CPUID_VENDOR_*` valen lo mismo a
-     * proposito, y las dos comprobaciones de abajo lo sostienen -- si alguien
-     * renumera uno de los dos, no compila en vez de devolver otro fabricante. */
+    /* \~english The detection lives in `cpuid/intrin.h`: it is pure CPUID and
+     * the dump needs it too.  `cpu_vendor` and `CPUID_VENDOR_*` are worth the
+     * same on purpose, and the two checks below hold that up -- if somebody
+     * renumbers either, it does not compile instead of returning another vendor.
+     * \~spanish La deteccion vive en `cpuid/intrin.h`: es CPUID puro y la
+     * necesita tambien el volcado.  `cpu_vendor` y `CPUID_VENDOR_*` valen lo
+     * mismo a proposito, y las dos comprobaciones de abajo lo sostienen -- si
+     * alguien renumera uno de los dos, no compila en vez de devolver otro
+     * fabricante. \~ */
     STATIC_ASSERT(CPUID_VENDOR_INTEL == (u32)CPU_VENDOR_INTEL,
                   "CPUID_VENDOR_INTEL and CPU_VENDOR_INTEL disagree");
     STATIC_ASSERT(CPUID_VENDOR_AMD == (u32)CPU_VENDOR_AMD,
@@ -73,11 +125,37 @@ static u32 detect_vendor(void) {
 }
 
 /**
- * @brief Familia, modelo y stepping, ya compuestos con sus partes extendidas.
+ * @brief
+ * \~english Family, model and stepping, already composed with their extended
+ *           parts.
+ * \~spanish Familia, modelo y stepping, ya compuestos con sus partes extendidas.
+ * \~
  *
+ * \~english
+ * The composition is not optional: across the whole modern line the base family
+ * is 6, and without adding the extended model every processor of the last
+ * fifteen years comes out as the same one.
+ *
+ *      EAX  27      20 19    16 13 12 11   8 7   4 3   0
+ *          +----------+--------+-----+------+-----+-----+
+ *          | ext fam  | ext mod|type | fam  | mod |step |
+ *          +----------+--------+-----+------+-----+-----+
+ *
+ *      family = fam + ext_fam          (only if fam == 15)
+ *      model  = mod + (ext_mod << 4)   (if fam is 6 or 15)
+ *
+ * \~spanish
  * La composicion no es opcional: en toda la linea moderna la familia base vale
  * 6, y sin sumar el modelo extendido todos los procesadores de los ultimos
  * quince anos salen como el mismo.
+ *
+ *      EAX  27      20 19    16 13 12 11   8 7   4 3   0
+ *          +----------+--------+-----+------+-----+-----+
+ *          | fam ext  | mod ext|tipo | fam  | mod |step |
+ *          +----------+--------+-----+------+-----+-----+
+ *
+ *      familia = fam + fam_ext          (solo si fam == 15)
+ *      modelo  = mod + (mod_ext << 4)   (si fam es 6 o 15)
  */
 static void detect_family(pmu_caps *c) {
     cpuid_regs r;
@@ -100,19 +178,37 @@ static void detect_family(pmu_caps *c) {
     }
 
     c->has_ds = (u8)cpuid_bit(r.edx, CPUID_01_EDX_DS);
-    /* El manual llama `PERF_CAPABILITIES` a lo que todo el mundo conoce como
-     * PDCM.  Se usa el nombre del manual, que es el que se puede buscar en el. */
+    /* \~english The manual calls `PERF_CAPABILITIES` what everybody knows as
+     * PDCM.  The manual's name is used, which is the one that can be looked up
+     * in it.
+     * \~spanish El manual llama `PERF_CAPABILITIES` a lo que todo el mundo
+     * conoce como PDCM.  Se usa el nombre del manual, que es el que se puede
+     * buscar en el. \~ */
     c->has_pdcm = (u8)cpuid_bit(r.ecx, CPUID_01_ECX_PERF_CAPABILITIES);
-    /* Este NO sale de la tabla generada, y no es un olvido: Intel documenta ese
-     * bit como "no usado, siempre cero".  Ver `cpuid_intrin.h`. */
+    /* \~english This one does NOT come from the generated table, and that is no
+     * oversight: Intel documents that bit as "not used, always zero".  See
+     * `cpuid/intrin.h`.
+     * \~spanish Este NO sale de la tabla generada, y no es un olvido: Intel
+     * documenta ese bit como "no usado, siempre cero".  Ver
+     * `cpuid/intrin.h`. \~ */
     c->has_hypervisor = (u8)cpuid_bit(r.ecx, CPUID_1_ECX_HYPERVISOR);
 }
 
-/** @brief El PMU arquitectonico, de la hoja 0x0A. */
+/** @brief
+ *  \~english The architectural PMU, from leaf 0x0A.  "Architectural" means the
+ *            enumeration is the same across vendors and generations, as opposed
+ *            to the model-specific events, which change with every part.
+ *  \~spanish El PMU arquitectonico, de la hoja 0x0A.  "Arquitectonico" quiere
+ *            decir que la enumeracion es la misma entre fabricantes y
+ *            generaciones, frente a los eventos especificos del modelo, que
+ *            cambian con cada pieza. \~ */
 static void detect_pmu(pmu_caps *c, u32 max_leaf) {
     cpuid_regs r;
     if (max_leaf < CPUID_LEAF_PMU) {
-        return; /* sin hoja 0x0A no hay PMU arquitectonico: todo queda a cero */
+        /* \~english no leaf 0x0A means no architectural PMU: it all stays zero
+         * \~spanish sin hoja 0x0A no hay PMU arquitectonico: todo queda a
+         * cero \~ */
+        return;
     }
     cpuid_query(CPUID_LEAF_PMU, 0, &r);
     c->pmu_version = r.eax & 0xFFu;
@@ -125,7 +221,13 @@ static void detect_pmu(pmu_caps *c, u32 max_leaf) {
     c->fixed_width = (r.edx >> 5) & 0xFFu;
 }
 
-/** @brief Clase de nucleo e hibridacion. */
+/** @brief
+ *  \~english Core class and hybridness.  A HYBRID part mixes two kinds of core
+ *            -- P, wide and fast; E, small and efficient -- and they do not have
+ *            the same PMU, so which one answered has to be known.
+ *  \~spanish Clase de nucleo e hibridacion.  Una pieza HIBRIDA mezcla dos tipos
+ *            de nucleo -- P, ancho y rapido; E, pequeno y eficiente -- y no
+ *            tienen el mismo PMU, asi que hay que saber cual contesto. \~ */
 static void detect_topology(pmu_caps *c, u32 max_leaf) {
     cpuid_regs r;
     if (max_leaf >= CPUID_LEAF_EXT_FEATURES) {
@@ -139,12 +241,30 @@ static void detect_topology(pmu_caps *c, u32 max_leaf) {
 }
 
 /**
- * @brief La puerta de APERF y MPERF.
+ * @brief
+ * \~english The APERF and MPERF gate.
+ * \~spanish La puerta de APERF y MPERF.
+ * \~
  *
- * Los dos contadores solo existen si `CPUID.06H:ECX[0]` lo dice, y son los que
- * permiten saber a que frecuencia REAL corrio el nucleo durante la muestra.
- * Sin ellos, un perfilador que reparta ciclos entre tiempo se equivoca en
- * cuanto la frecuencia cambia, que en una pieza moderna es siempre.
+ * \~english
+ * APERF and MPERF are two free-running counters: one advances with the ACTUAL
+ * clock and the other with a fixed reference.  Their ratio is the real frequency
+ * the core ran at.
+ *
+ * They only exist if `CPUID.06H:ECX[0]` says so, and they are what allows
+ * knowing at what REAL frequency the core ran during the sample.  Without them,
+ * a profiler dividing cycles by time gets it wrong as soon as the frequency
+ * changes, which on a modern part is always.
+ *
+ * \~spanish
+ * APERF y MPERF son dos contadores que corren solos: uno avanza con el reloj
+ * REAL y el otro con una referencia fija.  Su cociente es la frecuencia de
+ * verdad a la que corrio el nucleo.
+ *
+ * Solo existen si `CPUID.06H:ECX[0]` lo dice, y son los que permiten saber a que
+ * frecuencia REAL corrio el nucleo durante la muestra.  Sin ellos, un perfilador
+ * que reparta ciclos entre tiempo se equivoca en cuanto la frecuencia cambia,
+ * que en una pieza moderna es siempre.
  */
 static void detect_hw_feedback(pmu_caps *c, u32 max_leaf) {
     cpuid_regs r;
@@ -155,7 +275,9 @@ static void detect_hw_feedback(pmu_caps *c, u32 max_leaf) {
     c->has_hw_feedback = (u8)cpuid_bit(r.ecx, CPUID_06_ECX_HW_FEEDBACK_CAP);
 }
 
-/** @brief Lo del rango extendido: TSC invariante, RDTSCP e IBS de AMD. */
+/** @brief
+ *  \~english The extended range: invariant TSC, RDTSCP and AMD's IBS.
+ *  \~spanish Lo del rango extendido: TSC invariante, RDTSCP e IBS de AMD. \~ */
 static void detect_extended(pmu_caps *c) {
     cpuid_regs r;
     u32 max_ext = cpuid_max_extended_leaf();
@@ -166,10 +288,15 @@ static void detect_extended(pmu_caps *c) {
     }
     if (max_ext >= CPUID_LEAF_EXT_FEATURES_AMD) {
         cpuid_query(CPUID_LEAF_EXT_FEATURES_AMD, 0, &r);
-        /* `rdtscp` es la unica forma de leer el contador Y saber en que nucleo
-         * se leyo sin una llamada al sistema por medio, y el mismo bit es la
-         * puerta de `IA32_TSC_AUX`.  Lo definen los dos fabricantes en la misma
-         * posicion, asi que se pregunta antes de mirar el fabricante. */
+        /* \~english `rdtscp` is the only way to read the counter AND know
+         * which core it was read on without a system call in between, and the
+         * same bit is `IA32_TSC_AUX`'s gate.  Both vendors define it at the same
+         * position, so it is asked before looking at the vendor.
+         * \~spanish `rdtscp` es la unica forma de leer el contador Y saber en
+         * que nucleo se leyo sin una llamada al sistema por medio, y el mismo
+         * bit es la puerta de `IA32_TSC_AUX`.  Lo definen los dos fabricantes en
+         * la misma posicion, asi que se pregunta antes de mirar el
+         * fabricante. \~ */
         c->has_rdtscp = (u8)cpuid_bit(r.edx, CPUID_80000001_EDX_RDTSCP);
         if (c->vendor == (u32)CPU_VENDOR_AMD) {
             c->has_ibs = (u8)cpuid_bit(r.ecx, CPUID_80000001_ECX_IBS);
@@ -178,12 +305,20 @@ static void detect_extended(pmu_caps *c) {
 }
 
 /**
- * @brief Lee un MSR y deja el resultado con su estado pegado.
+ * @brief
+ * \~english Reads an MSR and leaves the result with its status attached.
+ * \~spanish Lee un MSR y deja el resultado con su estado pegado.
+ * \~
  *
- * @param gated si es cero, ni se intenta: se anota `ERR_UNSUPPORTED`.  Sirve
- *              para los MSR cuya existencia depende de un bit de CPUID -- leer
- *              uno que no existe provoca una excepcion de proteccion general,
- *              y en kernel eso es un pantallazo.
+ * @param gated
+ * \~english if zero, it is not even attempted: `ERR_UNSUPPORTED` is recorded.
+ *           It serves the MSRs whose existence depends on a CPUID bit --
+ *           reading one that does not exist raises a general protection fault,
+ *           and in the kernel that is a blue screen.
+ * \~spanish si es cero, ni se intenta: se anota `ERR_UNSUPPORTED`.  Sirve para
+ *           los MSR cuya existencia depende de un bit de CPUID -- leer uno que
+ *           no existe provoca una excepcion de proteccion general, y en kernel
+ *           eso es un pantallazo.
  */
 static void read_msr_into(msr_value *out, u32 index, int gated) {
     if (!gated) {
@@ -198,34 +333,52 @@ static void read_msr_into(msr_value *out, u32 index, int gated) {
 }
 
 /**
- * @brief La segunda opinion: lo que dicen los MSR.
+ * @brief
+ * \~english The second opinion: what the MSRs say.
+ * \~spanish La segunda opinion: lo que dicen los MSR.
+ * \~
  *
+ * \~english
+ * Only the GUARANTEED ones are read.  `IA32_DS_AREA` and `IA32_PEBS_ENABLE`
+ * exist only if the Debug Store exists, which is exactly what is being asked;
+ * attempting it would risk a blue screen to get ahead of an answer
+ * `IA32_MISC_ENABLE` already gives.  See the gates note in `msr/access.h`.
+ *
+ * \~spanish
  * Solo se leen los GARANTIZADOS.  `IA32_DS_AREA` y `IA32_PEBS_ENABLE` existen
  * unicamente si existe el Debug Store, que es justo lo que se esta preguntando;
  * intentarlo seria arriesgar un pantallazo para adelantar una respuesta que
- * `IA32_MISC_ENABLE` ya da.  Ver la nota al final de `msr.h`.
+ * `IA32_MISC_ENABLE` ya da.  Ver la nota de las puertas en `msr/access.h`.
  */
 static void detect_msrs(pmu_caps *c) {
     int is_intel = (c->vendor == (u32)CPU_VENDOR_INTEL);
 
-    /* IA32_MISC_ENABLE existe en toda la linea Intel desde el P6. */
+    /* \~english IA32_MISC_ENABLE exists across the whole Intel line since the
+     * P6.
+     * \~spanish IA32_MISC_ENABLE existe en toda la linea Intel desde el P6. \~ */
     read_msr_into(&c->misc_enable, IA32_MISC_ENABLE, is_intel);
 
-    /* IA32_PERF_CAPABILITIES solo si CPUID anuncia PDCM.  Esta es la razon de
-     * ser del parametro `gated`. */
+    /* \~english IA32_PERF_CAPABILITIES only if CPUID announces PDCM.  This is
+     * the whole reason the `gated` parameter exists.
+     * \~spanish IA32_PERF_CAPABILITIES solo si CPUID anuncia PDCM.  Esta es la
+     * razon de ser del parametro `gated`. \~ */
     read_msr_into(&c->perf_capabilities, IA32_PERF_CAPABILITIES,
                   is_intel && c->has_pdcm);
 
-    /* Los tres siguientes existen si hay PMU arquitectonico. */
+    /* \~english The next three exist if there is an architectural PMU.
+     * \~spanish Los tres siguientes existen si hay PMU arquitectonico. \~ */
     read_msr_into(&c->debugctl, IA32_DEBUGCTL, is_intel);
     read_msr_into(&c->fixed_ctr_ctrl, IA32_FIXED_CTR_CTRL,
                   is_intel && c->pmu_version > 0);
     read_msr_into(&c->perf_global_ctrl, IA32_PERF_GLOBAL_CTRL,
                   is_intel && c->pmu_version > 0);
 
-    /* Los selectores de evento, uno por contador de proposito general.  El
-     * limite lo pone CPUID y no una constante: leer el selector de un contador
-     * que no existe es leer un MSR que no existe. */
+    /* \~english The event selectors, one per general purpose counter.  The
+     * limit comes from CPUID and not from a constant: reading the selector of a
+     * counter that does not exist is reading an MSR that does not exist.
+     * \~spanish Los selectores de evento, uno por contador de proposito general.
+     * El limite lo pone CPUID y no una constante: leer el selector de un
+     * contador que no existe es leer un MSR que no existe. \~ */
     {
         u32 i;
         u32 count = c->gp_counters;
@@ -240,12 +393,37 @@ static void detect_msrs(pmu_caps *c) {
 }
 
 /**
- * @brief El veredicto, que es donde se junta lo que dicen las dos fuentes.
+ * @brief
+ * \~english The verdict, which is where what the two sources say comes
+ *           together.
+ * \~spanish El veredicto, que es donde se junta lo que dicen las dos fuentes.
+ * \~
  *
+ * \~english
+ * The distinction that matters, and the reason this is not a boolean: when the
+ * MSR says PEBS is there and CPUID says there is no Debug Store, the answer is
+ * NOT "no".  It is "CPUID is masking it", which sends you somewhere completely
+ * different -- to try it -- instead of to giving up.
+ *
+ *      CPUID says   MSR says    verdict
+ *      ----------   --------    -------
+ *      yes          yes         AVAILABLE
+ *      no           yes         MASKED_BY_CPUID   <- the interesting one
+ *      either       no          UNAVAILABLE       <- this one IS a no
+ *      no read                  UNKNOWN
+ *
+ * \~spanish
  * La distincion que importa, y la razon de que esto no sea un booleano: cuando
- * el MSR dice que PEBS esta y CPUID dice que no hay Debug Store, la respuesta
- * NO es "no".  Es "CPUID lo esta tapando", que manda a un sitio completamente
+ * el MSR dice que PEBS esta y CPUID dice que no hay Debug Store, la respuesta NO
+ * es "no".  Es "CPUID lo esta tapando", que manda a un sitio completamente
  * distinto -- a probarlo -- en vez de a darse por vencido.
+ *
+ *      CPUID dice   MSR dice    veredicto
+ *      ----------   --------    ---------
+ *      si           si          AVAILABLE
+ *      no           si          MASKED_BY_CPUID   <- el interesante
+ *      cualquiera   no          UNAVAILABLE       <- este si es un no
+ *      sin lectura              UNKNOWN
  */
 static void derive_verdict(pmu_caps *c) {
     if (c->vendor != (u32)CPU_VENDOR_INTEL) {
@@ -253,12 +431,19 @@ static void derive_verdict(pmu_caps *c) {
         return;
     }
 
-    /* `IA32_PERF_CAPABILITIES`, entero.
+    /* \~english `IA32_PERF_CAPABILITIES`, whole.
+     *
+     * The PEBS format is bits 11:8, NOT the low ones -- those are the LBR
+     * format.  The first version read `value & 0xF` and published the LBR format
+     * calling it PEBS; on a machine with neither of the two, both are zero and
+     * the mistake is invisible.
+     *
+     * \~spanish `IA32_PERF_CAPABILITIES`, entero.
      *
      * El formato de PEBS son los bits 11:8, NO los bajos -- esos son el formato
      * de LBR.  La primera version leia `value & 0xF` y publicaba el formato de
      * LBR llamandolo de PEBS; en una maquina sin ninguno de los dos, los dos
-     * valen cero y el error es invisible. */
+     * valen cero y el error es invisible. \~ */
     if (c->perf_capabilities.rc == OK) {
         u64 v = c->perf_capabilities.value;
         c->lbr_format = (u8)((v >> MSR_PERF_CAP_LBR_FORMAT_SHIFT) &
@@ -273,13 +458,21 @@ static void derive_verdict(pmu_caps *c) {
         c->perf_metrics = (u8)((v >> MSR_PERF_CAP_PERF_METRICS) & 1u);
         c->pebs_output_pt = (u8)((v >> MSR_PERF_CAP_PEBS_OUTPUT_PT) & 1u);
     }
-    /* Que contadores estan ARMADOS de verdad.
+    /* \~english Which counters are really ARMED.
+     *
+     * A general purpose counter counts if its selector has `EN` set AND its bit
+     * is open in the global gate.  The fixed ones, if `FIXED_CTR_CTRL` is not
+     * zero.  Looking only at the gate -- which is what the first version did --
+     * gives a permanent yes: on this machine it reads with all nine bits open
+     * and no counter counting.
+     *
+     * \~spanish Que contadores estan ARMADOS de verdad.
      *
      * Un contador de proposito general cuenta si su selector tiene el `EN`
      * puesto Y su bit esta abierto en la compuerta global.  Los fijos, si
      * `FIXED_CTR_CTRL` no es cero.  Mirar solo la compuerta -- que es lo que
      * hacia la primera version -- da un si permanente: en esta maquina se lee
-     * con los nueve bits abiertos y ningun contador contando. */
+     * con los nueve bits abiertos y ningun contador contando. \~ */
     {
         u32 i;
         u64 gate = (c->perf_global_ctrl.rc == OK) ? c->perf_global_ctrl.value
@@ -306,9 +499,12 @@ static void derive_verdict(pmu_caps *c) {
         return;
     }
 
-    /* `IA32_MISC_ENABLE`, tambien entero.  Que BTS y PEBS caigan los dos es
-     * coherente -- los dos cuelgan del Debug Store -- y esa coherencia es
-     * informacion: un bit suelto no habria dicho nada. */
+    /* \~english `IA32_MISC_ENABLE`, whole as well.  That BTS and PEBS both fall
+     * is coherent -- both hang off the Debug Store -- and that coherence is
+     * information: a single bit would have said nothing.
+     * \~spanish `IA32_MISC_ENABLE`, tambien entero.  Que BTS y PEBS caigan los
+     * dos es coherente -- los dos cuelgan del Debug Store -- y esa coherencia es
+     * informacion: un bit suelto no habria dicho nada. \~ */
     c->perfmon_available =
             (u8)((c->misc_enable.value >>
                   MSR_MISC_ENABLE_PERFMON_AVAILABLE) & 1u);
@@ -349,7 +545,9 @@ status pmu_caps_detect(u32 cpu_index, pmu_caps *out) {
 }
 
 /* -------------------------------------------------------------------------
- *  Presentacion.
+ *  \~english  Presentation.
+ *  \~spanish  Presentacion.
+ *  \~
  * ------------------------------------------------------------------------- */
 
 const char *pmu_caps_verdict_name(u8 verdict) {
@@ -380,10 +578,27 @@ const char *pmu_caps_core_class_name(u32 core_type) {
     }
 }
 
-/** @brief Los siete eventos arquitectonicos, en el orden de los bits de EBX. */
+/** @brief
+ *  \~english The architectural events, in EBX's bit order.
+ *  \~spanish Los eventos arquitectonicos, en el orden de los bits de EBX. \~ */
 /**
- * @brief Cuantos eventos arquitectonicos enumera el mapa de bits de CPUID.0AH.
+ * @brief
+ * \~english How many architectural events the CPUID.0AH bitmap enumerates.
+ * \~spanish Cuantos eventos arquitectonicos enumera el mapa de bits de
+ *           CPUID.0AH.
+ * \~
  *
+ * \~english
+ * THIRTEEN, not seven.  The classic seven are the ones everybody knows, and that
+ * is why the code carried eight entries: the seven plus the topdown slots.  The
+ * manual enumerates six more -- the full topdown breakdown and the LBR
+ * insertions -- and without walking them all the report would say "not
+ * enumerated" about something the part does have.
+ *
+ * It is the reason for taking these tables from the manual and not from memory:
+ * what one remembers is what was there when one learnt it.
+ *
+ * \~spanish
  * TRECE, no siete.  Los siete clasicos son los que todo el mundo conoce, y por
  * eso el codigo llevaba ocho entradas: los siete y las ranuras de topdown.  El
  * manual enumera seis mas -- el reparto de topdown al completo y las
@@ -395,7 +610,10 @@ const char *pmu_caps_core_class_name(u32 core_type) {
  */
 #define ARCH_EVENT_MAX 13
 
-/** @brief El nombre que les da el manual, en el orden de los bits de EBX. */
+/** @brief
+ *  \~english The name the manual gives them, in EBX's bit order.
+ *  \~spanish El nombre que les da el manual, en el orden de los bits de
+ *            EBX. \~ */
 static const char *const arch_event_name[ARCH_EVENT_MAX] = {
         "CORE_CYC        core cycles",
         "INTR_RET        instructions retired",
@@ -412,7 +630,27 @@ static const char *const arch_event_name[ARCH_EVENT_MAX] = {
         "LBR_INSERTS     LBR inserts"};
 
 /**
- * @brief Su codificacion, donde se conoce.
+ * @brief
+ * \~english Their encoding, where it is known.
+ * \~spanish Su codificacion, donde se conoce.
+ * \~
+ *
+ * \~english
+ * An ENCODING is the pair (event, umask) written into the selector to ask the
+ * counter for that event.
+ *
+ * The first seven come from the architectural events table and are checked.  For
+ * the last six **nothing is put**: the topdown breakdown is not read through an
+ * event selector but through the metrics register, and the encoding of the LBR
+ * insertions is specific to each microarchitecture.
+ *
+ * Writing a plausible number there would be exactly the mistake this module
+ * exists not to make.  When it is needed, it comes from the
+ * per-microarchitecture tables, not from memory.
+ *
+ * \~spanish
+ * Una CODIFICACION es la pareja (evento, umask) que se escribe en el selector
+ * para pedirle al contador ese evento.
  *
  * Los siete primeros salen de la tabla de eventos arquitectonicos y estan
  * contrastados.  De los seis ultimos **no se pone nada**: el reparto de topdown
@@ -430,7 +668,9 @@ static const char *const arch_event_encoding[ARCH_EVENT_MAX] = {
         "(microarchitecture-specific)", "(microarchitecture-specific)",
         "(microarchitecture-specific)"};
 
-/** @brief Anade "yes"/"no" segun una bandera. */
+/** @brief
+ *  \~english Appends "yes"/"no" according to a flag.
+ *  \~spanish Anade "yes"/"no" segun una bandera. \~ */
 static void put_flag(writer *w, const char *label, u8 flag) {
     put_str(w, label);
     put_str(w, flag ? "yes" : "no");
@@ -535,10 +775,14 @@ status pmu_caps_format(const pmu_caps *caps, char *buf, usize cap,
                                       : "no");
     put_ch(&w, '\n');
 
-    /* Los dos registros DECODIFICADOS.  Leer uno y quedarse con un bit es como
-     * se llega a conclusiones sueltas: que BTS y PEBS caigan los dos explica la
-     * causa -- los dos cuelgan del Debug Store --, y eso no se ve mirando solo
-     * el bit de PEBS. */
+    /* \~english The two registers DECODED.  Reading one and keeping a single bit
+     * is how you arrive at loose conclusions: that BTS and PEBS both fall
+     * explains the cause -- both hang off the Debug Store -- and that cannot be
+     * seen by looking only at the PEBS bit.
+     * \~spanish Los dos registros DECODIFICADOS.  Leer uno y quedarse con un bit
+     * es como se llega a conclusiones sueltas: que BTS y PEBS caigan los dos
+     * explica la causa -- los dos cuelgan del Debug Store --, y eso no se ve
+     * mirando solo el bit de PEBS. \~ */
     put_str(&w, "  IA32_MISC_ENABLE decoded:");
     put_flag(&w, "  perfmon=", caps->perfmon_available);
     put_flag(&w, "  BTS unavailable=", caps->bts_unavailable);
@@ -570,8 +814,10 @@ status pmu_caps_format(const pmu_caps *caps, char *buf, usize cap,
     put_flag(&w, "  PEBS to PT=", caps->pebs_output_pt);
     put_ch(&w, '\n');
     if (!caps->full_width_write) {
-        /* Un limite del que conviene enterarse aqui y no al ver salir el doble
-         * de interrupciones de las pedidas. */
+        /* \~english A limit worth finding out about here, and not upon seeing
+         * twice as many interrupts as were asked for come out.
+         * \~spanish Un limite del que conviene enterarse aqui y no al ver salir
+         * el doble de interrupciones de las pedidas. \~ */
         put_str(&w, "    -> no full-width write: periods above 2^31 cannot be "
                     "programmed\n");
     }

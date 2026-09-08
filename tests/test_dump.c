@@ -24,9 +24,9 @@
  *   - y la extraccion de campos, que es la unica aritmetica del fichero.
  */
 
-#include "cpuid_table.h"
-#include "dump.h"
-#include "msr_table.h"
+#include "cpuid/table.h"
+#include "msr/table.h"
+#include "probe/dump.h"
 
 #include <stdio.h>
 #include <string.h>

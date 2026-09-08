@@ -22,9 +22,9 @@
  * ninguno, porque se cree.
  */
 
-#include "pmu_caps.h"
+#include "probe/pmu_caps.h"
 
-#include "msr.h"
+#include "msr/access.h"
 
 #include <stdio.h>
 

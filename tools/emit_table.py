@@ -28,7 +28,7 @@ hojas.
 import io
 
 # Los registros de salida de CPUID, en el orden en que los numera el contrato
-# de `common/cpuid_table.h`.
+# de `common/cpuid/table.h`.
 REG_INDEX = {"EAX": 0, "EBX": 1, "ECX": 2, "EDX": 3}
 REG_MACRO = ("CPUID_REG_EAX", "CPUID_REG_EBX", "CPUID_REG_ECX", "CPUID_REG_EDX")
 
@@ -171,7 +171,7 @@ def cpuid_table_c(vendor, fields, tool):
                 f["leaf"], off, sub, REG_MACRO[REG_INDEX[f["reg"]]],
                 f["lo"], f["hi"] - f["lo"] + 1, flags, f["name"]))
     return _table_c("Los campos de CPUID", vendor.capitalize(), tool,
-                    "cpuid_table.h", blob, rows,
+                    "cpuid/table.h", blob, rows,
                     "cpuid_table_%s" % vendor, "cpuid_field", "cpuid_table")
 
 
@@ -203,7 +203,7 @@ def msr_table_c(vendor, regs, tool):
             % (r["addr"], off, leaf, subtxt, REG_MACRO[REG_INDEX[reg]],
                lo, width, flags, r["name"]))
     return _table_c("Los MSR", vendor.capitalize(), tool,
-                    "msr_table.h", blob, rows,
+                    "msr/table.h", blob, rows,
                     "msr_table_%s" % vendor, "msr_reg", "msr_table")
 
 

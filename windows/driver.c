@@ -7,12 +7,85 @@
 
 /**
  * @file driver.c
- * @brief El `.sys`: pregunta el PMU en CADA procesador logico y deja el
- *        informe en un fichero.
+ * @brief
+ * \~english The `.sys`: asks the PMU on EVERY logical processor and leaves the
+ *           report in a file.
+ * \~spanish El `.sys`: pregunta el PMU en CADA procesador logico y deja el
+ *           informe en un fichero.
+ * \~
+ *
+ * \~english
+ * WHAT A DRIVER IS, FOR WHOEVER DOES NOT WRITE THEM DAILY.  A `.sys` is not a
+ * program: it has no `main`, nobody runs it, and it never has a process of its
+ * own.  It is a block of code the operating system LOADS INTO ITS OWN ADDRESS
+ * SPACE and calls at `DriverEntry`, running in ring 0 -- the privilege level
+ * where the `rdmsr` instruction is legal and where a bad pointer does not kill a
+ * process, it kills the machine.
+ *
+ * From that come the three rules that shape everything here: no standard
+ * library, memory only at load time, and no waiting for anybody.
+ *
+ * WHAT IT DOES, ONCE, WHEN IT LOADS:
+ *
+ *      DriverEntry
+ *          |
+ *          +--> for each logical processor:
+ *          |        pin this thread to it     <- otherwise you read whichever
+ *          |        ask CPUID and the MSRs       core the scheduler chose
+ *          |        release the pinning
+ *          |
+ *          +--> writes  C:\vxp_pmu_report.txt   the readable report
+ *          +--> writes  C:\vxp_cpuid.csv        every CPUID field x 24
+ *          +--> writes  C:\vxp_msr.csv          every MSR x 24
+ *
+ * IT IS THE FIRST THING A PROFILER HAS TO DO, and not an auxiliary tool: until
+ * it is known which counters exist, whether they are precise and whether
+ * somebody else is using them, any number published afterwards is a guess with
+ * formatting.
+ *
+ * And it answers a question that from user space CANNOT be answered.  CPUID says
+ * there is no Debug Store on this machine, but under a hypervisor CPUID is not a
+ * read of the silicon -- every `cpuid` leaves through a VM exit and the answer is
+ * put there by the hypervisor.  `IA32_MISC_ENABLE` bit 12 is the authoritative
+ * word, and an MSR is only reachable from here.
+ *
+ * WHY CORE BY CORE.  On a hybrid part the P cores and the E cores need not
+ * answer the same, and a single read does not say which of the two replied.
+ * Pinning the affinity before each question is the only thing that turns the
+ * report into 24 answers instead of one repeated 24 times.
+ *
+ * WHAT THIS DRIVER DOES NOT DO, ON PURPOSE: it creates no device, exposes no
+ * IOCTL, programs not one counter and leaves nothing armed.  It only reads.
+ * Anything that arms something can leave the machine with the PMU programmed if
+ * it fails halfway, and that is a later increment with its own orderly teardown.
+ *
+ * \~spanish
+ * QUE ES UN DRIVER, PARA QUIEN NO LOS ESCRIBE A DIARIO.  Un `.sys` no es un
+ * programa: no tiene `main`, nadie lo ejecuta, y nunca tiene un proceso propio.
+ * Es un bloque de codigo que el sistema operativo CARGA DENTRO DE SU PROPIO
+ * ESPACIO DE DIRECCIONES y llama en `DriverEntry`, corriendo en anillo cero --
+ * el nivel de privilegio donde la instruccion `rdmsr` es legal y donde un
+ * puntero malo no mata un proceso, mata la maquina.
+ *
+ * De ahi salen las tres reglas que dan forma a todo esto: sin biblioteca
+ * estandar, memoria solo al cargar, y sin esperar a nadie.
+ *
+ * QUE HACE, UNA VEZ, AL CARGARSE:
+ *
+ *      DriverEntry
+ *          |
+ *          +--> por cada procesador logico:
+ *          |        fija este hilo a el       <- si no, se lee del nucleo que
+ *          |        pregunta CPUID y los MSR     el planificador haya elegido
+ *          |        suelta la fijacion
+ *          |
+ *          +--> escribe  C:\vxp_pmu_report.txt   el informe legible
+ *          +--> escribe  C:\vxp_cpuid.csv        todos los campos CPUID x 24
+ *          +--> escribe  C:\vxp_msr.csv          todos los MSR x 24
  *
  * ES LO PRIMERO QUE TIENE QUE HACER UN PERFILADOR, y no una herramienta
- * auxiliar: mientras no se sepa que contadores hay, si son precisos y si
- * alguien mas los esta usando, cualquier numero que se publique despues es una
+ * auxiliar: mientras no se sepa que contadores hay, si son precisos y si alguien
+ * mas los esta usando, cualquier numero que se publique despues es una
  * suposicion con formato.
  *
  * Y responde a una pregunta que desde espacio de usuario NO SE PUEDE responder.
@@ -21,26 +94,36 @@
  * y la respuesta la pone el hipervisor --.  `IA32_MISC_ENABLE` bit 12 es la
  * palabra autorizada, y a un MSR solo se llega desde aqui.
  *
- * POR QUE NUCLEO A NUCLEO.  En una pieza hibrida los nucleos P y los E no
- * tienen por que responder lo mismo, y una sola lectura no dice cual de los dos
+ * POR QUE NUCLEO A NUCLEO.  En una pieza hibrida los nucleos P y los E no tienen
+ * por que responder lo mismo, y una sola lectura no dice cual de los dos
  * contesto.  Fijar la afinidad antes de cada pregunta es lo unico que convierte
  * el informe en 24 respuestas en vez de en una repetida 24 veces.
  *
- * LO QUE ESTE DRIVER NO HACE, A PROPOSITO: no crea dispositivo, no expone
- * IOCTL, no programa un solo contador y no deja nada armado.  Solo lee.  Todo
- * lo que arma algo puede dejar la maquina con la PMU programada si falla en
- * medio, y eso es un incremento posterior con su propia descarga ordenada.
+ * LO QUE ESTE DRIVER NO HACE, A PROPOSITO: no crea dispositivo, no expone IOCTL,
+ * no programa un solo contador y no deja nada armado.  Solo lee.  Todo lo que
+ * arma algo puede dejar la maquina con la PMU programada si falla en medio, y
+ * eso es un incremento posterior con su propia descarga ordenada.
  */
 
 #include "nt.h"
 
-#include "dump.h"
-#include "msr.h"
-#include "pmu_caps.h"
+#include "msr/access.h"
+#include "probe/dump.h"
+#include "probe/pmu_caps.h"
 
 /**
- * @brief Lectura de MSR que sobrevive a que el registro no exista.
+ * @brief
+ * \~english MSR read that survives the register not existing.
+ * \~spanish Lectura de MSR que sobrevive a que el registro no exista.
+ * \~
  *
+ * \~english
+ * It lives in `asm/x86_64/msr_guard.S`; it is declared here because it has no
+ * header of its own -- it is a single function and on the Windows side.
+ *
+ * @return non-zero if it read; zero if the processor refused the read.
+ *
+ * \~spanish
  * Vive en `asm/x86_64/msr_guard.S`; se declara aqui porque no tiene cabecera
  * propia -- es una sola funcion y del lado de Windows.
  *
@@ -48,62 +131,111 @@
  */
 int msr_read_guarded(u32 addr, u64 *out);
 
-/* La etiqueta de pool no es opcional: es lo que permite ver desde el depurador
- * quien retiene memoria (`!poolused`).  Sin ella una fuga es una cifra anonima.
+/* \~english A POOL TAG is four characters Windows stores next to every kernel
+ * allocation.  It is not optional: it is what lets you see from the debugger who
+ * is holding memory (`!poolused`).  Without it a leak is an anonymous figure.
+ *
+ * It is written as bytes and not as a multi-character constant because the
+ * latter is an extension each compiler orders its own way.
+ *
+ * \~spanish Una ETIQUETA DE POOL son cuatro caracteres que Windows guarda junto
+ * a cada reserva del kernel.  No es opcional: es lo que permite ver desde el
+ * depurador quien retiene memoria (`!poolused`).  Sin ella una fuga es una cifra
+ * anonima.
+ *
  * Se escribe como bytes y no como constante multi-caracter porque eso ultimo es
- * una extension que cada compilador ordena a su manera. */
+ * una extension que cada compilador ordena a su manera. \~ */
 #define REPORT_POOL_TAG                                                        \
     ((ULONG)('V' | ('X' << 8) | ('P' << 16) | ('P' << 24)))
 
-/* 24 procesadores logicos gastan unos 32 KiB.  Se pide de sobra y de una vez:
- * la regla es reservar al arrancar y nunca mas, asi que no hay opcion de
- * crecer sobre la marcha. */
+/* \~english 24 logical processors take about 32 KiB.  It is asked for with slack
+ * and all at once: the rule is to allocate at start-up and never again, so there
+ * is no option of growing along the way.
+ * \~spanish 24 procesadores logicos gastan unos 32 KiB.  Se pide de sobra y de
+ * una vez: la regla es reservar al arrancar y nunca mas, asi que no hay opcion
+ * de crecer sobre la marcha. \~ */
 #define REPORT_BYTES (256u * 1024u)
 
-/* Donde se deja el informe.  `\??\` es el prefijo del kernel para las rutas con
- * letra de unidad. */
+/* \~english Where the report is left.  `\??\` is the kernel's prefix for paths
+ * with a drive letter: down here there is no `C:` on its own, because drive
+ * letters are a user-space convention that the object manager resolves.
+ * \~spanish Donde se deja el informe.  `\??\` es el prefijo del kernel para las
+ * rutas con letra de unidad: aqui abajo no existe `C:` a secas, porque las
+ * letras de unidad son una convencion de espacio de usuario que resuelve el
+ * gestor de objetos. \~ */
 #define REPORT_PATH L"\\??\\C:\\vxp_pmu_report.txt"
 
-/* Los dos volcados, cada uno su fichero: son ESQUEMAS distintos y juntarlos
- * daria algo que ningun lector de CSV puede procesar. */
+/* \~english The two dumps, each its own file: they are different SCHEMAS and
+ * joining them would give something no CSV reader can process.
+ * \~spanish Los dos volcados, cada uno su fichero: son ESQUEMAS distintos y
+ * juntarlos daria algo que ningun lector de CSV puede procesar. \~ */
 #define CPUID_CSV_PATH L"\\??\\C:\\vxp_cpuid.csv"
 #define MSR_CSV_PATH L"\\??\\C:\\vxp_msr.csv"
 
-/* Un volcado de CPUID son ~730 filas por procesador y el de MSR 1.588; con 24
- * procesadores, el de MSR ronda los 4 MiB.  Se pide de sobra y de una vez: la
- * regla es reservar al arrancar y nunca mas. */
+/* \~english A CPUID dump is ~730 rows per processor and the MSR one 1,588; with
+ * 24 processors the MSR one is around 4 MiB.  Asked for with slack and all at
+ * once, same rule as above.
+ * \~spanish Un volcado de CPUID son ~730 filas por procesador y el de MSR 1.588;
+ * con 24 procesadores, el de MSR ronda los 4 MiB.  Se pide de sobra y de una
+ * vez, misma regla que arriba. \~ */
 #define CSV_BYTES (8u * 1024u * 1024u)
 
 /*
+ * \~english
+ * Are the MSRs the manual does not document with an adjacent condition read too?
+ *
+ * With a guard, yes: `msr_read_guarded` survives the register not existing, and
+ * one that does not exist comes out as `faulted`, which is data -- it says this
+ * part does not have it.  They are 1,273 of 1,588, that is, most of the map.
+ *
+ * It is left as a macro and not hardwired because the two things being tested
+ * here are INDEPENDENT and it is worth being able to separate them: that the CSV
+ * dump works, and that the guard holds in ring 0.  Mixed together, a failure
+ * does not say which of the two it was.
+ *
+ * \~spanish
  * ¿Se leen tambien los MSR que el manual no documenta con condicion adyacente?
  *
- * Con guarda, si: `msr_read_guarded` sobrevive a que el registro no exista, y
- * el que no exista sale como `faulted`, que es un dato -- dice que esta pieza
- * no lo tiene.  Son 1.273 de 1.588, o sea la mayor parte del mapa.
+ * Con guarda, si: `msr_read_guarded` sobrevive a que el registro no exista, y el
+ * que no exista sale como `faulted`, que es un dato -- dice que esta pieza no lo
+ * tiene.  Son 1.273 de 1.588, o sea la mayor parte del mapa.
  *
  * Se deja en una macro y no cableado porque las dos cosas que se prueban aqui
  * son INDEPENDIENTES y conviene poder separarlas: que el volcado en CSV
- * funcione, y que el guarda aguante en anillo cero.  Mezcladas, un fallo no
- * dice cual de las dos fue.
+ * funcione, y que el guarda aguante en anillo cero.  Mezcladas, un fallo no dice
+ * cual de las dos fue.
+ * \~
  */
 #ifndef VXP_MSR_GUARDED
 #define VXP_MSR_GUARDED 0
 #endif
 
-/** @brief ¿Salio bien una llamada al kernel? */
+/** @brief
+ *  \~english Did a kernel call go well?  `NTSTATUS` is negative on failure.
+ *  \~spanish ¿Salio bien una llamada al kernel?  `NTSTATUS` es negativo al
+ *            fallar. \~ */
 #define NT_SUCCESS(st) (((NTSTATUS)(st)) >= 0)
 
 /**
- * @brief Anade una cadena al informe, sin pasarse del bufer.
+ * @brief
+ * \~english Appends a string to the report, without overrunning the buffer.
+ * \~spanish Anade una cadena al informe, sin pasarse del bufer.
+ * \~
  *
- * @param buf destino.
- * @param cap cuanto cabe.
- * @param len cuanto hay escrito ya; se actualiza.
- * @param s   texto terminado en nul.
+ * @param buf \~english destination \~spanish destino \~
+ * @param cap \~english how much fits \~spanish cuanto cabe \~
+ * @param len \~english how much is written already; updated \~spanish cuanto hay escrito ya; se actualiza \~
+ * @param s   \~english nul-terminated text \~spanish texto terminado en nul \~
  *
+ * \~english
+ * There is no `strlen` nor `memcpy` here: there is no standard library in the
+ * kernel, and pulling in `ntoskrnl`'s to copy four labels would be more
+ * dependency than code.
+ *
+ * \~spanish
  * No hay `strlen` ni `memcpy` aqui: en kernel no hay biblioteca estandar, y
- * traerse las de `ntoskrnl` para copiar cuatro rotulos seria mas dependencia
- * que codigo.
+ * traerse las de `ntoskrnl` para copiar cuatro rotulos seria mas dependencia que
+ * codigo.
  */
 static void append_str(char *buf, usize cap, usize *len, const char *s) {
     usize i = 0;
@@ -114,7 +246,9 @@ static void append_str(char *buf, usize cap, usize *len, const char *s) {
     }
 }
 
-/** @brief Anade un entero sin signo en decimal. */
+/** @brief
+ *  \~english Appends an unsigned integer in decimal.
+ *  \~spanish Anade un entero sin signo en decimal. \~ */
 static void append_u32(char *buf, usize cap, usize *len, u32 v) {
     char tmp[12];
     int n = 0;
@@ -135,18 +269,46 @@ static void append_u32(char *buf, usize cap, usize *len, u32 v) {
 }
 
 /**
- * @brief Pregunta el PMU en un procesador logico concreto.
+ * @brief
+ * \~english Asks the PMU on one specific logical processor.
+ * \~spanish Pregunta el PMU en un procesador logico concreto.
+ * \~
+ *
+ * \~english
+ * WHY GROUP AND BIT AND NOT A NUMBER.  Windows arranges processors into GROUPS
+ * of at most 64, because the affinity mask is a 64-bit word.  A machine with 80
+ * processors has two groups, and the processor's identity is the pair
+ * `(group, bit within the group)`.  Assuming a single group works on every
+ * machine anybody normally tests on, and silently reads the wrong core on the
+ * one that has two.
+ *
+ * @param group \~english the processor's group
+ * @param bit   its position within the group
+ * @param index global number, only to label the result
+ * @param out   where to leave what was detected
+ * @return whatever the detection returned
+ *
+ * The affinity is set and ALWAYS released, even if the detection failed:
+ * leaving a system thread pinned to a core is the kind of leftover that does
+ * not give an error, it gives a machine that behaves oddly.
+ *
+ * \~spanish
+ * POR QUE GRUPO Y BIT Y NO UN NUMERO.  Windows reparte los procesadores en
+ * GRUPOS de como mucho 64, porque la mascara de afinidad es una palabra de 64
+ * bits.  Una maquina con 80 procesadores tiene dos grupos, y la identidad del
+ * procesador es la pareja `(grupo, bit dentro del grupo)`.  Suponer un solo
+ * grupo funciona en cualquier maquina en la que uno prueba normalmente, y lee el
+ * nucleo equivocado en silencio justo en la que tiene dos.
  *
  * @param group  grupo del procesador.
  * @param bit    su posicion dentro del grupo.
  * @param index  numero global, solo para etiquetar el resultado.
  * @param out    donde dejar lo detectado.
- *
  * @return lo que devolviera la deteccion.
  *
- * La afinidad se pone y se QUITA siempre, incluso si la deteccion fallara:
- * dejar un hilo del sistema fijado a un nucleo es la clase de resto que no da
- * un error, da una maquina que se comporta raro.
+ * La afinidad se pone y se QUITA siempre, incluso si la deteccion fallara: dejar
+ * un hilo del sistema fijado a un nucleo es la clase de resto que no da un
+ * error, da una maquina que se comporta raro.
  */
 static status detect_on_cpu(USHORT group, ULONG bit, u32 index, pmu_caps *out) {
     GROUP_AFFINITY want;
@@ -174,33 +336,69 @@ static status detect_on_cpu(USHORT group, ULONG bit, u32 index, pmu_caps *out) {
 }
 
 /**
- * @brief Lee un MSR de verdad, para el volcado.
+ * @brief
+ * \~english Reads an MSR for real, for the dump.
+ * \~spanish Lee un MSR de verdad, para el volcado.
+ * \~
  *
- * Es lo unico que el volcado no puede hacer por su cuenta: `common/dump.c` no
- * conoce ningun sistema, y a un MSR solo se llega desde anillo cero.  Entra por
- * puntero a funcion para que el mismo fuente sirva aqui y en modo usuario.
+ * \~english
+ * It is the only thing the dump cannot do on its own: `common/probe/dump.c`
+ * knows no system, and an MSR is only reachable from ring 0.  It comes in as a
+ * function pointer so the same source serves here and in user mode.
+ *
+ * \~spanish
+ * Es lo unico que el volcado no puede hacer por su cuenta: `common/probe/dump.c`
+ * no conoce ningun sistema, y a un MSR solo se llega desde anillo cero.  Entra
+ * por puntero a funcion para que el mismo fuente sirva aqui y en modo usuario.
  */
 static msr_value dump_read_msr(u32 addr, void *ctx) {
     msr_value v;
     (void)ctx;
     v.value = 0;
-    /* Con GUARDA: `msr_read_guarded` esta en `asm/x86_64/msr_guard.S` y
-     * sobrevive a leer un registro que no existe.  Es lo que permite mirar los
+    /* \~english WITH A GUARD: `msr_read_guarded` is in `asm/x86_64/msr_guard.S`
+     * and survives reading a register that does not exist.  It is what allows
+     * looking at the 1,273 the manual does not document with an adjacent
+     * condition instead of skipping them -- without it, each of those would be a
+     * blue screen.
+     * \~spanish Con GUARDA: `msr_read_guarded` esta en `asm/x86_64/msr_guard.S`
+     * y sobrevive a leer un registro que no existe.  Es lo que permite mirar los
      * 1.273 que el manual no documenta con condicion adyacente en vez de
-     * saltarselos -- sin el, cada uno de esos seria una pantalla azul. */
+     * saltarselos -- sin el, cada uno de esos seria una pantalla azul. \~ */
     v.rc = msr_read_guarded(addr, &v.value) ? OK : ERR_FAULT;
     return v;
 }
 
 /**
- * @brief Recorre los procesadores logicos volcando CPUID o MSR a un CSV.
+ * @brief
+ * \~english Walks the logical processors dumping CPUID or MSRs into a CSV.
+ * \~spanish Recorre los procesadores logicos volcando CPUID o MSR a un CSV.
+ * \~
  *
- * @param msr distinto de cero para volcar los MSR; cero para CPUID.
+ * @param msr \~english non-zero to dump the MSRs; zero for CPUID \~spanish distinto de cero para volcar los MSR; cero para CPUID \~
  *
+ * \~english
+ * ONE SINGLE FILE WITH EVERY PROCESSOR, and the header only on the first:
+ * repeating it in the middle turns the table into something no CSV reader
+ * processes in one pass.  The `cpu` column is what lets the rows of all
+ * twenty-four coexist without stepping on each other.
+ *
+ *      cpu,leaf,...      <- header, once
+ *      0,0x00000000,...  <- pinned to cpu 0
+ *      0,0x00000001,...
+ *      1,0x00000000,...  <- pinned to cpu 1
+ *      ...
+ *
+ * \~spanish
  * UN SOLO FICHERO CON TODOS LOS PROCESADORES, y la cabecera solo en el primero:
- * repetirla en medio convierte la tabla en algo que ningun lector de CSV
- * procesa de una pasada.  La columna `cpu` es la que hace que las filas de los
+ * repetirla en medio convierte la tabla en algo que ningun lector de CSV procesa
+ * de una pasada.  La columna `cpu` es la que hace que las filas de los
  * veinticuatro convivan sin pisarse.
+ *
+ *      cpu,leaf,...      <- cabecera, una vez
+ *      0,0x00000000,...  <- fijado al cpu 0
+ *      0,0x00000001,...
+ *      1,0x00000000,...  <- fijado al cpu 1
+ *      ...
  */
 static usize build_csv(char *buf, usize cap, int msr) {
     usize len = 0;
@@ -228,9 +426,12 @@ static usize build_csv(char *buf, usize cap, int msr) {
             previous.Reserved[1] = 0;
             previous.Reserved[2] = 0;
 
-            /* La afinidad se pone y se QUITA siempre, tambien si el volcado se
-             * queda sin sitio: dejar un hilo del sistema fijado a un nucleo no
-             * da un error, da una maquina que se comporta raro. */
+            /* \~english The affinity is set and ALWAYS released, also if the
+             * dump runs out of room: leaving a system thread pinned to a core
+             * does not give an error, it gives a machine that behaves oddly.
+             * \~spanish La afinidad se pone y se QUITA siempre, tambien si el
+             * volcado se queda sin sitio: dejar un hilo del sistema fijado a un
+             * nucleo no da un error, da una maquina que se comporta raro. \~ */
             KeSetSystemGroupAffinityThread(&want, &previous);
             if (msr) {
                 rc = msr_dump(emitted, emitted == 0, VXP_MSR_GUARDED,
@@ -244,9 +445,14 @@ static usize build_csv(char *buf, usize cap, int msr) {
 
             len += written;
             if (rc != OK) {
-                /* Se queda corto o el fabricante no esta en las tablas.  Se
-                 * dice EN el fichero: uno cortado que no lo diga parece
-                 * completo, y esa es la unica forma de fallar que no se ve. */
+                /* \~english It ran short, or the vendor is not in the tables.
+                 * It is said IN the file: a truncated one that does not say so
+                 * looks complete, and that is the only way of failing that
+                 * cannot be seen.
+                 * \~spanish Se queda corto o el fabricante no esta en las
+                 * tablas.  Se dice EN el fichero: uno cortado que no lo diga
+                 * parece completo, y esa es la unica forma de fallar que no se
+                 * ve. \~ */
                 append_str(buf, cap, &len, "# truncated at cpu ");
                 append_u32(buf, cap, &len, emitted);
                 append_str(buf, cap, &len, "\n");
@@ -259,13 +465,24 @@ static usize build_csv(char *buf, usize cap, int msr) {
 }
 
 /**
- * @brief Recorre todos los procesadores logicos y compone el informe.
- * @return cuantos bytes de `buf` se usaron.
+ * @brief
+ * \~english Walks every logical processor and composes the report.
+ * \~spanish Recorre todos los procesadores logicos y compone el informe.
+ * \~
  *
- * Se recorre GRUPO A GRUPO preguntando cuantos hay en cada uno, y no
- * suponiendo que los grupos estan llenos: un grupo a medias haria que la
- * cuenta global y las mascaras se separasen, y el sintoma seria medir dos veces
- * el mismo nucleo -- que no falla, solo miente.
+ * @return \~english how many bytes of `buf` were used \~spanish cuantos bytes de `buf` se usaron \~
+ *
+ * \~english
+ * It walks GROUP BY GROUP asking how many there are in each, rather than
+ * assuming the groups are full: a half-filled group would make the global count
+ * and the masks drift apart, and the symptom would be measuring the same core
+ * twice -- which does not fail, it just lies.
+ *
+ * \~spanish
+ * Se recorre GRUPO A GRUPO preguntando cuantos hay en cada uno, y no suponiendo
+ * que los grupos estan llenos: un grupo a medias haria que la cuenta global y
+ * las mascaras se separasen, y el sintoma seria medir dos veces el mismo nucleo
+ * -- que no falla, solo miente.
  */
 static usize build_report(char *buf, usize cap) {
     usize len = 0;
@@ -290,9 +507,12 @@ static usize build_report(char *buf, usize cap) {
 
             rc = detect_on_cpu(group, bit, emitted, &caps);
             if (rc != OK) {
-                /* No deberia pasar -- solo falla con destino nulo --, pero un
-                 * informe que se salta un nucleo en silencio es peor que uno
-                 * que dice cual se salto. */
+                /* \~english It should not happen -- it only fails with a null
+                 * destination -- but a report that silently skips a core is
+                 * worse than one that says which it skipped.
+                 * \~spanish No deberia pasar -- solo falla con destino nulo --,
+                 * pero un informe que se salta un nucleo en silencio es peor que
+                 * uno que dice cual se salto. \~ */
                 append_str(buf, cap, &len, "cpu ");
                 append_u32(buf, cap, &len, emitted);
                 append_str(buf, cap, &len, ": detection refused\n\n");
@@ -303,8 +523,10 @@ static usize build_report(char *buf, usize cap) {
             rc = pmu_caps_format(&caps, buf + len, cap - len, &written);
             len += written;
             if (rc != OK) {
-                /* Se quedo sin sitio.  Se dice, en vez de entregar un informe
-                 * cortado que parezca completo. */
+                /* \~english It ran out of room.  It is said, instead of handing
+                 * over a truncated report that looks complete.
+                 * \~spanish Se quedo sin sitio.  Se dice, en vez de entregar un
+                 * informe cortado que parezca completo. \~ */
                 append_str(buf, cap, &len, "\n*** report truncated: buffer full ***\n");
                 return len;
             }
@@ -316,7 +538,28 @@ static usize build_report(char *buf, usize cap) {
 }
 
 /**
- * @brief Escribe un bufer en un fichero, sobrescribiendo.
+ * @brief
+ * \~english Writes a buffer to a file, overwriting.
+ * \~spanish Escribe un bufer en un fichero, sobrescribiendo.
+ * \~
+ *
+ * \~english
+ * THE `Zw` PREFIX is not decoration: `ZwCreateFile` and `NtCreateFile` are the
+ * same call, but the `Zw` form tells the kernel the caller is the kernel itself,
+ * so the parameters are not validated as if they came from user space and the
+ * previous access mode is `KernelMode`.  Calling the `Nt` form from here would
+ * make the system treat our own pointers as untrusted.
+ *
+ * @return the status of whichever call failed, or `STATUS_SUCCESS`.
+ *
+ * \~spanish
+ * EL PREFIJO `Zw` no es decoracion: `ZwCreateFile` y `NtCreateFile` son la misma
+ * llamada, pero la forma `Zw` le dice al kernel que quien llama es el propio
+ * kernel, con lo que los parametros no se validan como si vinieran de espacio de
+ * usuario y el modo de acceso previo es `KernelMode`.  Llamar a la forma `Nt`
+ * desde aqui haria que el sistema tratara nuestros propios punteros como no
+ * fiables.
+ *
  * @return el estado de la llamada que fallara, o `STATUS_SUCCESS`.
  */
 static NTSTATUS write_file(const WCHAR *path, const char *buf, usize len) {
@@ -355,8 +598,16 @@ static NTSTATUS write_file(const WCHAR *path, const char *buf, usize len) {
 }
 
 /**
- * @brief Descarga.  No hay nada armado, asi que no hay nada que desarmar.
+ * @brief
+ * \~english Unload.  Nothing is armed, so there is nothing to disarm.
+ * \~spanish Descarga.  No hay nada armado, asi que no hay nada que desarmar.
+ * \~
  *
+ * \~english
+ * It is declared all the same because without a `DriverUnload` the driver cannot
+ * be unloaded without rebooting, and that turns every test into a reboot.
+ *
+ * \~spanish
  * Se declara igualmente porque sin `DriverUnload` el driver no se puede
  * descargar sin reiniciar, y eso convierte cada prueba en un reinicio.
  */
@@ -367,12 +618,31 @@ static void driver_unload(PDRIVER_OBJECT driver) {
 }
 
 /**
- * @brief Punto de entrada.
+ * @brief
+ * \~english Entry point.
+ * \~spanish Punto de entrada.
+ * \~
  *
- * Todo el trabajo ocurre aqui, a PASSIVE_LEVEL, que es donde reservar memoria y
- * abrir un fichero son operaciones legales.  Nada de esto seria posible desde
- * el manejador de la PMI -- y por eso el camino de las muestras sera un anillo
- * preasignado y no esto.
+ * \~english
+ * IRQL is Windows' interrupt request level: a per-processor priority that says
+ * what is legal to do right now.  All the work happens here at PASSIVE_LEVEL,
+ * the lowest one, which is where allocating memory and opening a file are legal
+ * operations -- both can block, and blocking above PASSIVE deadlocks the
+ * machine.
+ *
+ * None of this would be possible from the PMI handler, which runs at a high
+ * IRQL -- and that is why the sample path will be a pre-allocated ring and not
+ * this.
+ *
+ * \~spanish
+ * IRQL es el nivel de peticion de interrupcion de Windows: una prioridad por
+ * procesador que dice que es legal hacer en este momento.  Todo el trabajo
+ * ocurre aqui a PASSIVE_LEVEL, el mas bajo, que es donde reservar memoria y
+ * abrir un fichero son operaciones legales -- las dos pueden bloquear, y
+ * bloquear por encima de PASSIVE cuelga la maquina.
+ *
+ * Nada de esto seria posible desde el manejador de la PMI, que corre a IRQL alta
+ * -- y por eso el camino de las muestras sera un anillo preasignado y no esto.
  */
 NTSTATUS DriverEntry(PDRIVER_OBJECT driver, PUNICODE_STRING registry_path) {
     char *report;
@@ -382,8 +652,17 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT driver, PUNICODE_STRING registry_path) {
     (void)registry_path;
     driver->DriverUnload = driver_unload;
 
-    /* La unica reserva, y en la inicializacion, que es lo que la regla permite.
-     * Ver profiler/README.md, seccion "Memoria". */
+    /* \~english The only allocation, and at initialisation, which is what the
+     * rule allows.  `NonPagedPoolNx` is kernel memory that is never paged out
+     * and is not executable: paged memory cannot be touched above PASSIVE_LEVEL,
+     * so anything the sample path may reach has to live here.  See
+     * profiler/README.md, "Memoria".
+     * \~spanish La unica reserva, y en la inicializacion, que es lo que la regla
+     * permite.  `NonPagedPoolNx` es memoria del kernel que nunca se pagina a
+     * disco y no es ejecutable: la memoria paginada no se puede tocar por encima
+     * de PASSIVE_LEVEL, asi que todo lo que el camino de las muestras pueda
+     * alcanzar tiene que vivir aqui.  Ver profiler/README.md, seccion
+     * "Memoria". \~ */
     report = (char *)ExAllocatePoolWithTag(NonPagedPoolNx, REPORT_BYTES,
                                            REPORT_POOL_TAG);
     if (report == 0) {
@@ -397,9 +676,12 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT driver, PUNICODE_STRING registry_path) {
 
     ExFreePoolWithTag(report, REPORT_POOL_TAG);
 
-    /* Y los dos volcados completos, cada uno en su fichero.  Van con su propia
-     * reserva y no reusando la del informe porque son de otro orden de tamano:
-     * 1.588 MSR por 24 procesadores no caben en 256 KiB. */
+    /* \~english And the two complete dumps, each in its own file.  They get
+     * their own allocation rather than reusing the report's because they are of
+     * another order of size: 1,588 MSRs by 24 processors do not fit in 256 KiB.
+     * \~spanish Y los dos volcados completos, cada uno en su fichero.  Van con
+     * su propia reserva y no reusando la del informe porque son de otro orden de
+     * tamano: 1.588 MSR por 24 procesadores no caben en 256 KiB. \~ */
     {
         char *csv = (char *)ExAllocatePoolWithTag(NonPagedPoolNx, CSV_BYTES,
                                                   REPORT_POOL_TAG);
@@ -427,9 +709,12 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT driver, PUNICODE_STRING registry_path) {
     }
 
     if (!NT_SUCCESS(st)) {
-        /* El informe se construyo y no se pudo guardar.  Se dice por la traza,
-         * que es lo unico que queda, y se carga igualmente: un fallo al
-         * escribir un fichero no es motivo para no estar. */
+        /* \~english The report was built and could not be saved.  It is said
+         * through the debug trace, which is all that is left, and it loads all
+         * the same: failing to write a file is no reason not to be there.
+         * \~spanish El informe se construyo y no se pudo guardar.  Se dice por
+         * la traza, que es lo unico que queda, y se carga igualmente: un fallo
+         * al escribir un fichero no es motivo para no estar. \~ */
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL,
                    "vesta_prof: could not write the report, status 0x%08X\n",
                    (unsigned)st);

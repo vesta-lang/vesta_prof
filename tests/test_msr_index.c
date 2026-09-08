@@ -36,7 +36,7 @@
  * necesite `STATIC_ASSERT` se lo trae el, como aqui. */
 #include "vxp_base.h"
 
-#include "msr_index.h"
+#include "msr/index.h"
 
 #include <stdio.h>
 

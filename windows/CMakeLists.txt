@@ -65,13 +65,13 @@ add_custom_target(vxp_ntoskrnl_import DEPENDS "${VXP_NTOSKRNL_IMPORT}")
 add_library(vesta_prof MODULE
         driver.c
         msr_win.c
-        ../common/pmu_caps.c
+        ../common/probe/pmu_caps.c
         # El volcado y las tablas de los manuales.  Entran AQUI porque el valor
         # de un MSR solo se puede leer desde anillo cero: dejar la lectura fuera
         # obligaria a inventar un canal para pedirla, y el driver ya escribe un
         # fichero.  Cuestan unos 100 KiB de datos de solo lectura, medidos.
-        ../common/dump.c
-        ../common/cpu_tables.c
+        ../common/probe/dump.c
+        ../common/probe/cpu_tables.c
         ../common/cpuid/intel/table.c
         ../common/cpuid/amd/table.c
         ../common/msr/intel/table.c

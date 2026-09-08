@@ -206,7 +206,7 @@ if (VXP_BUILD_TESTS)
     # lados de kernel.
     add_executable(test_pmu_caps
             tests/test_pmu_caps.c
-            common/pmu_caps.c)
+            common/probe/pmu_caps.c)
     target_link_libraries(test_pmu_caps PRIVATE vxp_base)
     target_include_directories(test_pmu_caps PRIVATE common)
     set_target_properties(test_pmu_caps PROPERTIES
@@ -251,8 +251,8 @@ if (VXP_BUILD_TESTS)
 
     add_executable(test_dump
             tests/test_dump.c
-            common/dump.c
-            common/cpu_tables.c
+            common/probe/dump.c
+            common/probe/cpu_tables.c
             ${VXP_TABLES})
     target_link_libraries(test_dump PRIVATE vxp_base)
     target_include_directories(test_dump PRIVATE common)
@@ -265,13 +265,34 @@ if (VXP_BUILD_TESTS)
     endif ()
     add_test(NAME dump COMMAND test_dump)
 
+    # La politica del anillo, ejercitada SIN driver.
+    #
+    # Es lo que se compra con que `common/` no incluya cabeceras del sistema: el
+    # area de datos la pone el llamante, asi que un array corriente ejercita el
+    # mismo codigo que corre dentro del manejador de interrupcion.  Lo que
+    # importa de esta politica -- que al llenarse se pierde lo NUEVO -- solo
+    # aparece cuando esta lleno, y llenarlo aqui cuesta microsegundos.
+    add_executable(test_ring
+            tests/test_ring.c
+            common/ring/produce.c)
+    target_link_libraries(test_ring PRIVATE vxp_base)
+    target_include_directories(test_ring PRIVATE common)
+    set_target_properties(test_ring PROPERTIES
+            C_STANDARD 11 C_STANDARD_REQUIRED ON)
+    if (MSVC)
+        target_compile_options(test_ring PRIVATE /W4)
+    else ()
+        target_compile_options(test_ring PRIVATE -Wall -Wextra -pedantic-errors)
+    endif ()
+    add_test(NAME ring COMMAND test_ring)
+
     # Y el volcado como binario, que es para lo que sirve: pegarlo en un informe
     # de fallo o comparar dos maquinas.  Sin privilegios, asi que los MSR salen
     # como catalogo -- nombre, direccion y puerta -- y sin valor.
     add_executable(vxp_dump
             cli/dump_main.c
-            common/dump.c
-            common/cpu_tables.c
+            common/probe/dump.c
+            common/probe/cpu_tables.c
             ${VXP_TABLES})
     target_link_libraries(vxp_dump PRIVATE vxp_base)
     target_include_directories(vxp_dump PRIVATE common)

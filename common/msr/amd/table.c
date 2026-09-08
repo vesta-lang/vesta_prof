@@ -22,14 +22,14 @@
  *
  * EL NOMBRE ES UN DESPLAZAMIENTO dentro del bloque de cadenas, no un puntero.
  * Un puntero por fila costaria ocho bytes y una reubicacion que el cargador
- * resuelve al arrancar, una por fila.  Ver `common/msr_table.h`.
+ * resuelve al arrancar, una por fila.  Ver `common/msr/table.h`.
  *
  * ES SU PROPIA UNIDAD DE TRADUCCION: quien no la referencie no la enlaza, asi
  * que tenerla en el arbol no le cuesta nada a quien no la use -- al driver,
  * sin ir mas lejos.
  */
 
-#include "msr_table.h"
+#include "msr/table.h"
 
 /* Los nombres, compartiendo los repetidos.  Array de bytes y no
  * literal de cadena: ver `Blob.lines` en tools/emit_table.py. */
