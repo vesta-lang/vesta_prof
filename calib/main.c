@@ -328,7 +328,33 @@ static int compare(const char *path, const double *medido) {
     printf("\n  contra la tabla: %s  (%u clases, %u formas con coste)\n",
            a.name, (unsigned)a.class_count, (unsigned)a.form_count);
 
-    if (!same_text(a.xml_sha256, CALIB_TABLE_HASH)) {
+    /* \~english THREE CASES AND NOT TWO, and the first version had two.  A table
+     * that does not SAY where it came from is not a table that says something
+     * else, and treating them the same refuses exactly the tables most worth
+     * comparing: a fused one -- uops.info completed with LLVM -- carries no
+     * single source hash, because it does not have one source.
+     *
+     * So: matching, compare; different, refuse; absent, compare AND SAY that it
+     * could not be checked.  Refusing there would leave the tool unable to look
+     * at the tables it is most often handed; comparing in silence would hide
+     * that the form numbers were not verified against anything.
+     *
+     * \~spanish TRES CASOS Y NO DOS, y la primera version tenia dos.  Una tabla
+     * que no DICE de donde salio no es una tabla que diga otra cosa, y tratarlas
+     * igual rechaza justamente las tablas que mas interesa comparar: una
+     * fusionada -- uops.info completada con LLVM -- no lleva un resumen de
+     * origen unico, porque no tiene un origen unico.
+     *
+     * Asi que: si cuadra, se compara; si difiere, se rechaza; si no lo dice, se
+     * compara Y SE DICE que no se pudo comprobar.  Rechazar ahi dejaria a la
+     * herramienta sin poder mirar las tablas que mas le van a dar; comparar en
+     * silencio esconderia que los numeros de forma no se contrastaron con
+     * nada. \~ */
+    if (a.xml_sha256[0] == 0 || same_text(a.xml_sha256, "-")) {
+        printf("  AVISO: la tabla no dice de que datos salio (suele ser una\n"
+               "  fusionada de varias fuentes).  Se compara, pero los numeros\n"
+               "  de forma no se han podido contrastar con nada.\n");
+    } else if (!same_text(a.xml_sha256, CALIB_TABLE_HASH)) {
         fprintf(stderr,
                 "\n  la tabla salio de otros datos que los numeros de forma de\n"
                 "  este banco.  No se compara: los numeros de forma son indices\n"
