@@ -125,11 +125,31 @@ else ()
     message(STATUS "profiler: plataforma sin lado de kernel; solo el lado de usuario")
 endif ()
 
-# NOTA para cuando haya fuentes de kernel: el `.sys` sera un objetivo de CMake
-# normal con las banderas del WDK, pero el `.ko` NO puede serlo -- los modulos
-# de Linux se construyen con `kbuild`, y lo unico que puede hacer CMake es
-# invocarlo.  Escribirlo como una biblioteca de CMake produciria algo que enlaza
-# y que el kernel no carga.  Ver linux/README.md.
+# -----------------------------------------------------------------------------
+#  El lado de kernel, cuando toca.
+# -----------------------------------------------------------------------------
+#
+# El `.sys` es un objetivo de CMake normal -- pero en SU directorio, porque un
+# driver necesita que no se le anadan las bibliotecas estandar del enlace y esa
+# variable es de ambito de directorio.  Ver windows/CMakeLists.txt.
+#
+# Con MSVC no se construye, y no por capricho: las banderas de enlace de un
+# driver son otras por completo (`/DRIVER`, `/SUBSYSTEM:NATIVE`,
+# `/ENTRY:DriverEntry`, y la biblioteca de importacion se genera con `lib` en
+# vez de con `dlltool`).  Soportar los dos seria mantener dos recetas de las que
+# solo una se usa a diario.  Se dice, en vez de producir algo que no carga.
+if (VXP_KERNEL_SIDE AND WIN32)
+    if (MSVC)
+        message(STATUS "profiler: el .sys no se construye con MSVC -- usa GCC o Clang")
+    else ()
+        add_subdirectory(windows)
+    endif ()
+endif ()
+
+# El `.ko` de Linux NO puede ser un objetivo de CMake: los modulos se construyen
+# con `kbuild`, que es el sistema de construccion del propio kernel, y lo unico
+# que puede hacer CMake es invocarlo.  Escribirlo como una biblioteca de CMake
+# produciria algo que enlaza y que el kernel no carga.  Ver linux/README.md.
 
 # -----------------------------------------------------------------------------
 #  Pruebas.
@@ -175,6 +195,28 @@ if (VXP_BUILD_TESTS)
         target_compile_options(test_vxp_abi PRIVATE -Wall -Wextra -pedantic-errors)
     endif ()
     add_test(NAME vxp_abi COMMAND test_vxp_abi)
+
+    # La deteccion del PMU, en ESPACIO DE USUARIO.
+    #
+    # Esto es lo que se compra con la regla de que `common/` no incluya
+    # cabeceras del sistema: el mismo fuente que corre dentro del kernel se
+    # compila aqui y se ejercita con un `msr_read` de mentira que define el
+    # propio test.  La sustitucion es en el ENLACE -- no hay tabla de punteros a
+    # funcion, ver common/msr.h --, que es la misma seleccion que usan los dos
+    # lados de kernel.
+    add_executable(test_pmu_caps
+            tests/test_pmu_caps.c
+            common/pmu_caps.c)
+    target_link_libraries(test_pmu_caps PRIVATE vxp_base)
+    target_include_directories(test_pmu_caps PRIVATE common)
+    set_target_properties(test_pmu_caps PROPERTIES
+            C_STANDARD 11 C_STANDARD_REQUIRED ON)
+    if (MSVC)
+        target_compile_options(test_pmu_caps PRIVATE /W4)
+    else ()
+        target_compile_options(test_pmu_caps PRIVATE -Wall -Wextra -pedantic-errors)
+    endif ()
+    add_test(NAME pmu_caps COMMAND test_pmu_caps)
 
     if (WIN32)
         # La disposicion de las estructuras del kernel que declaramos nosotros.

@@ -133,6 +133,117 @@ KIRQL KeGetCurrentIrql(void);
 #define APC_LEVEL 1
 #define DISPATCH_LEVEL 2
 
+/* -------------------------------------------------------------------------
+ *  Afinidad: correr algo EN un procesador logico concreto.
+ *
+ *  Es lo que hace falta para preguntarle el PMU a cada nucleo por separado, y
+ *  en una pieza hibrida eso no es un lujo: los nucleos P y los E no tienen por
+ *  que responder lo mismo, y una sola lectura no dice cual de los dos contesto.
+ *
+ *  Se usa la forma con GRUPO y no la vieja `KeSetSystemAffinityThread`: por
+ *  encima de 64 procesadores logicos Windows los reparte en grupos, y la forma
+ *  antigua solo alcanza al grupo actual.  Hoy sobraria; el dia que no, el fallo
+ *  seria silencioso -- se mediria dos veces el mismo nucleo.
+ * ------------------------------------------------------------------------- */
+
+typedef u64 KAFFINITY;
+
+/** Un procesador logico dentro de su grupo. */
+typedef struct _GROUP_AFFINITY {
+    KAFFINITY Mask;
+    USHORT Group;
+    USHORT Reserved[3];
+} GROUP_AFFINITY, *PGROUP_AFFINITY;
+
+/** Para `KeQueryActiveProcessorCountEx`: todos los grupos, no solo el actual. */
+#define ALL_PROCESSOR_GROUPS ((USHORT)0xFFFF)
+
+ULONG KeQueryActiveProcessorCountEx(USHORT GroupNumber);
+void KeSetSystemGroupAffinityThread(PGROUP_AFFINITY Affinity,
+                                    PGROUP_AFFINITY PreviousAffinity);
+void KeRevertToUserGroupAffinityThread(PGROUP_AFFINITY PreviousAffinity);
+
+/* -------------------------------------------------------------------------
+ *  Ficheros, para sacar el informe.
+ *
+ *  POR QUE UN FICHERO Y NO `DbgPrint`.  Lo segundo solo se ve con un depurador
+ *  de kernel enganchado o con un visor de trazas y el filtro de impresion
+ *  tocado en el registro.  Un informe que hay que montar algo para leer es un
+ *  informe que no se lee.  Un fichero se abre y ya.
+ *
+ *  Esto corre en `DriverEntry`, o sea a PASSIVE_LEVEL, que es donde la E/S de
+ *  ficheros es legal.  Desde el manejador de la PMI no se podria ni de lejos --
+ *  y de ahi que el camino de las muestras sea un anillo y no esto.
+ * ------------------------------------------------------------------------- */
+
+typedef void *HANDLE;
+typedef u32 ACCESS_MASK;
+
+/** El resultado de una operacion de E/S: como fue, y cuanto movio. */
+typedef struct _IO_STATUS_BLOCK {
+    /* La union va CON NOMBRE, no anonima: esta cabecera tiene que compilar
+     * tambien como C++, y una union anonima sin marcar no es portable entre
+     * los dos. */
+    union {
+        NTSTATUS Status;
+        PVOID Pointer;
+    } u;
+    ULONG_PTR Information;
+} IO_STATUS_BLOCK, *PIO_STATUS_BLOCK;
+
+/** Como se nombra un objeto del kernel: aqui, la ruta del fichero. */
+typedef struct _OBJECT_ATTRIBUTES {
+    ULONG Length;
+    HANDLE RootDirectory;
+    PUNICODE_STRING ObjectName;
+    ULONG Attributes;
+    PVOID SecurityDescriptor;
+    PVOID SecurityQualityOfService;
+} OBJECT_ATTRIBUTES, *POBJECT_ATTRIBUTES;
+
+/* Atributos del objeto. */
+#define OBJ_CASE_INSENSITIVE 0x00000040u
+/* Sin esto el descriptor seria del proceso que casualmente estuviera activo al
+ * cargar el driver, y se cerraria con el.  Un descriptor de kernel es del
+ * kernel. */
+#define OBJ_KERNEL_HANDLE 0x00000200u
+
+/* Accesos y banderas de creacion.  Solo los que se usan. */
+#define GENERIC_WRITE 0x40000000u
+#define SYNCHRONIZE 0x00100000u
+#define FILE_ATTRIBUTE_NORMAL 0x00000080u
+#define FILE_SHARE_READ 0x00000001u
+#define FILE_OVERWRITE_IF 0x00000005u
+#define FILE_SYNCHRONOUS_IO_NONALERT 0x00000020u
+#define FILE_NON_DIRECTORY_FILE 0x00000040u
+
+NTSTATUS ZwCreateFile(HANDLE *FileHandle, ACCESS_MASK DesiredAccess,
+                      POBJECT_ATTRIBUTES ObjectAttributes,
+                      PIO_STATUS_BLOCK IoStatusBlock, s64 *AllocationSize,
+                      ULONG FileAttributes, ULONG ShareAccess,
+                      ULONG CreateDisposition, ULONG CreateOptions,
+                      PVOID EaBuffer, ULONG EaLength);
+NTSTATUS ZwWriteFile(HANDLE FileHandle, HANDLE Event, PVOID ApcRoutine,
+                     PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock,
+                     PVOID Buffer, ULONG Length, s64 *ByteOffset, ULONG *Key);
+NTSTATUS ZwClose(HANDLE Handle);
+
+void RtlInitUnicodeString(PUNICODE_STRING DestinationString,
+                          const WCHAR *SourceString);
+
+/* -------------------------------------------------------------------------
+ *  Trazas.
+ *
+ *  Complementa al fichero, no lo sustituye: si el driver falla ANTES de poder
+ *  abrirlo, esto es lo unico que queda.  De ahi que se use solo para las
+ *  novedades y los errores del arranque.
+ * ------------------------------------------------------------------------- */
+
+#define DPFLTR_IHVDRIVER_ID 77
+#define DPFLTR_ERROR_LEVEL 0
+
+ULONG DbgPrintEx(ULONG ComponentId, ULONG Level, const char *Format, ...);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

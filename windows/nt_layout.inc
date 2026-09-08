@@ -40,3 +40,32 @@ NT_LAYOUT_OFF(DRIVER_OBJECT, DriverExtension, 48)
 NT_LAYOUT_OFF(DRIVER_OBJECT, DriverName, 56)
 NT_LAYOUT_OFF(DRIVER_OBJECT, DriverUnload, 104)
 NT_LAYOUT_OFF(DRIVER_OBJECT, MajorFunction, 112)
+
+/* Afinidad por grupo: se le pasa al kernel por valor, asi que si el tamano no
+ * coincide se lee basura como mascara -- y una mascara equivocada no falla,
+ * mide OTRO nucleo. */
+NT_LAYOUT_SIZE(GROUP_AFFINITY, 16)
+NT_LAYOUT_OFF(GROUP_AFFINITY, Mask, 0)
+NT_LAYOUT_OFF(GROUP_AFFINITY, Group, 8)
+
+/* El resultado de una operacion de E/S.
+ *
+ * NO se comprueba el desplazamiento del primer campo, que es una union: en las
+ * cabeceras de referencia se llama `DUMMYUNIONNAME` -- una macro que segun la
+ * configuracion se expande a un nombre o a nada --, asi que nombrarlo aqui
+ * romperia la mitad que contrasta contra ellas.  Con el tamano total y el
+ * desplazamiento de `Information` queda igual de sujeto: si la union midiera
+ * otra cosa, `Information` no caeria en 8. */
+NT_LAYOUT_SIZE(IO_STATUS_BLOCK, 16)
+NT_LAYOUT_OFF(IO_STATUS_BLOCK, Information, 8)
+
+/* Como se nombra un objeto del kernel.  `Length` es el propio tamano de la
+ * estructura y el kernel lo VALIDA, asi que un tamano equivocado aqui se
+ * convierte en un rechazo al abrir el fichero, no en corrupcion. */
+NT_LAYOUT_SIZE(OBJECT_ATTRIBUTES, 48)
+NT_LAYOUT_OFF(OBJECT_ATTRIBUTES, Length, 0)
+NT_LAYOUT_OFF(OBJECT_ATTRIBUTES, RootDirectory, 8)
+NT_LAYOUT_OFF(OBJECT_ATTRIBUTES, ObjectName, 16)
+NT_LAYOUT_OFF(OBJECT_ATTRIBUTES, Attributes, 24)
+NT_LAYOUT_OFF(OBJECT_ATTRIBUTES, SecurityDescriptor, 32)
+NT_LAYOUT_OFF(OBJECT_ATTRIBUTES, SecurityQualityOfService, 40)

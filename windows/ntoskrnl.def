@@ -1,0 +1,62 @@
+;
+; VestaVM - Maquina Virtual Distribuida
+;
+; Copyright (C) 2026 David Lopez.T (DesmonHak) (Castilla y Leon, ES)
+; Licencia: GPLv2 (ver LICENSE y NOTICE).
+;
+; De aqui sale la biblioteca de importacion contra la que enlaza el `.sys`, y
+; por eso el driver no necesita el WDK: es la segunda de las tres cosas que el
+; WDK aportaria -- las otras son las declaraciones, que estan en `nt.h`, y las
+; banderas del enlace, que son eso, banderas.
+;
+; SOLO LO QUE SE USA.  Un simbolo de mas aqui no rompe nada -- si nadie lo
+; nombra, el enlazador no lo saca de la biblioteca --, pero esta lista es
+; tambien la respuesta a "¿de que depende este driver?", y esa respuesta pierde
+; valor en cuanto lleva cosas que no son verdad.
+;
+; EN x86-64 NO HAY DECORACION: una sola convencion de llamada, asi que los
+; nombres van tal cual.  En 32 bits habria que escribirlos con su `@n`, y ese es
+; uno de los motivos por los que este fichero no serviria sin tocar.
+;
+LIBRARY ntoskrnl.exe
+
+EXPORTS
+
+; --- memoria -----------------------------------------------------------------
+; La etiqueta es lo que permite ver una fuga desde el depurador (`!poolused`).
+ExAllocatePoolWithTag
+ExFreePoolWithTag
+
+; --- afinidad ----------------------------------------------------------------
+; Preguntarle el PMU a cada nucleo por separado.  En una pieza hibrida eso no es
+; un lujo: los P y los E no tienen por que responder lo mismo.
+KeQueryActiveProcessorCountEx
+KeSetSystemGroupAffinityThread
+KeRevertToUserGroupAffinityThread
+
+; --- contexto ----------------------------------------------------------------
+; Para AFIRMAR el IRQL en depuracion, no para cambiarlo.
+KeGetCurrentIrql
+
+; --- cadenas y ficheros ------------------------------------------------------
+; El informe sale a un fichero y no por `DbgPrint` porque un informe que hay que
+; montar un depurador para leer es un informe que no se lee.
+RtlInitUnicodeString
+ZwCreateFile
+ZwWriteFile
+ZwClose
+
+; --- trazas ------------------------------------------------------------------
+; Complementa al fichero: si el driver falla ANTES de poder abrirlo, esto es lo
+; unico que queda.
+DbgPrintEx
+
+; --- las que puede inventarse el compilador ----------------------------------
+; Aunque el codigo no las llame, GCC y Clang tienen derecho a convertir un bucle
+; de copia o de puesta a cero en una llamada a estas.  Sin ellas el enlace
+; fallaria por un simbolo que no aparece en ningun fuente, que es de los errores
+; mas desconcertantes que hay.  `ntoskrnl` las exporta.
+memset
+memcpy
+memmove
+memcmp
