@@ -236,6 +236,53 @@ if (VXP_BUILD_TESTS)
     endif ()
     add_test(NAME msr_index COMMAND test_msr_index)
 
+    # El volcado: recorre las tablas generadas y dice que vale cada campo en
+    # ESTA maquina.
+    #
+    # Las cuatro tablas son unidades de traduccion aparte a proposito, y aqui se
+    # ve para que: este objetivo las enlaza y el driver no, asi que los sesenta
+    # kilobytes de nombres no llegan al kernel por el mero hecho de estar en el
+    # arbol.
+    set(VXP_TABLES
+            common/cpuid/intel/table.c
+            common/cpuid/amd/table.c
+            common/msr/intel/table.c
+            common/msr/amd/table.c)
+
+    add_executable(test_dump
+            tests/test_dump.c
+            common/dump.c
+            common/cpu_tables.c
+            ${VXP_TABLES})
+    target_link_libraries(test_dump PRIVATE vxp_base)
+    target_include_directories(test_dump PRIVATE common)
+    set_target_properties(test_dump PROPERTIES
+            C_STANDARD 11 C_STANDARD_REQUIRED ON)
+    if (MSVC)
+        target_compile_options(test_dump PRIVATE /W4)
+    else ()
+        target_compile_options(test_dump PRIVATE -Wall -Wextra -pedantic-errors)
+    endif ()
+    add_test(NAME dump COMMAND test_dump)
+
+    # Y el volcado como binario, que es para lo que sirve: pegarlo en un informe
+    # de fallo o comparar dos maquinas.  Sin privilegios, asi que los MSR salen
+    # como catalogo -- nombre, direccion y puerta -- y sin valor.
+    add_executable(vxp_dump
+            cli/dump_main.c
+            common/dump.c
+            common/cpu_tables.c
+            ${VXP_TABLES})
+    target_link_libraries(vxp_dump PRIVATE vxp_base)
+    target_include_directories(vxp_dump PRIVATE common)
+    set_target_properties(vxp_dump PROPERTIES
+            C_STANDARD 11 C_STANDARD_REQUIRED ON)
+    if (MSVC)
+        target_compile_options(vxp_dump PRIVATE /W4)
+    else ()
+        target_compile_options(vxp_dump PRIVATE -Wall -Wextra -pedantic-errors)
+    endif ()
+
     if (WIN32)
         # La disposicion de las estructuras del kernel que declaramos nosotros.
         # Se compila como C, que es como se va a usar `nt.h`.

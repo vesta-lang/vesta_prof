@@ -89,6 +89,32 @@ equivocar -- aritmetica de direcciones, sin contexto para saber si el numero que
 sale es el bueno -- era justo el unico que no se podia probar, porque su
 cabecera no compilaba como C++.
 
+## Las tablas de los manuales tienen DOS caras
+
+Lo que se saca de los manuales de Intel y AMD se emite dos veces, en la misma
+pasada del generador:
+
+| | Para que |
+| --- | --- |
+| `msr_index.h`, `cpuid_index.h` | **macros**. Preguntar por un campo que ya se conoce al escribir el codigo |
+| `*/table.c` | **datos**. Recorrerlos todos sin saber de antemano cuales hay |
+
+No es duplicar. Una macro no existe en ejecucion: no se puede iterar sobre ella
+ni imprimir su nombre, que es justo lo que necesita un volcado. Salen del mismo
+sitio en la misma pasada para que no puedan discrepar; generarlas por separado
+es como se acaba con una que dice una cosa y otra que dice otra.
+
+**Cada tabla es su propia unidad de traduccion**, y eso es lo que permite que
+esten en el arbol sin que el driver las pague: quien no las referencie no las
+enlaza. El nombre de cada fila es un **desplazamiento** dentro de un bloque de
+cadenas, no un puntero -- un puntero por fila serian ocho bytes y una
+reubicacion que el cargador resuelve al arrancar, una por fila --.
+
+Y el bloque es un **array de bytes**, no un literal de cadena: los literales
+adyacentes se concatenan en uno solo, C99 garantiza 4.095 caracteres y MSVC
+corta en 65.535, que es un limite duro y los nombres de MSR ya rondan los
+treinta mil.
+
 ## Cabeceras
 
 Al lado de sus fuentes, no en `include/`. Una cabecera de aqui incluida desde
