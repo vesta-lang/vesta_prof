@@ -34,7 +34,19 @@
 
 #include "nt.h"
 
+#include "dump.h"
+#include "msr.h"
 #include "pmu_caps.h"
+
+/**
+ * @brief Lectura de MSR que sobrevive a que el registro no exista.
+ *
+ * Vive en `asm/x86_64/msr_guard.S`; se declara aqui porque no tiene cabecera
+ * propia -- es una sola funcion y del lado de Windows.
+ *
+ * @return distinto de cero si leyo; cero si el procesador rechazo la lectura.
+ */
+int msr_read_guarded(u32 addr, u64 *out);
 
 /* La etiqueta de pool no es opcional: es lo que permite ver desde el depurador
  * quien retiene memoria (`!poolused`).  Sin ella una fuga es una cifra anonima.
@@ -51,6 +63,32 @@
 /* Donde se deja el informe.  `\??\` es el prefijo del kernel para las rutas con
  * letra de unidad. */
 #define REPORT_PATH L"\\??\\C:\\vxp_pmu_report.txt"
+
+/* Los dos volcados, cada uno su fichero: son ESQUEMAS distintos y juntarlos
+ * daria algo que ningun lector de CSV puede procesar. */
+#define CPUID_CSV_PATH L"\\??\\C:\\vxp_cpuid.csv"
+#define MSR_CSV_PATH L"\\??\\C:\\vxp_msr.csv"
+
+/* Un volcado de CPUID son ~730 filas por procesador y el de MSR 1.588; con 24
+ * procesadores, el de MSR ronda los 4 MiB.  Se pide de sobra y de una vez: la
+ * regla es reservar al arrancar y nunca mas. */
+#define CSV_BYTES (8u * 1024u * 1024u)
+
+/*
+ * ¿Se leen tambien los MSR que el manual no documenta con condicion adyacente?
+ *
+ * Con guarda, si: `msr_read_guarded` sobrevive a que el registro no exista, y
+ * el que no exista sale como `faulted`, que es un dato -- dice que esta pieza
+ * no lo tiene.  Son 1.273 de 1.588, o sea la mayor parte del mapa.
+ *
+ * Se deja en una macro y no cableado porque las dos cosas que se prueban aqui
+ * son INDEPENDIENTES y conviene poder separarlas: que el volcado en CSV
+ * funcione, y que el guarda aguante en anillo cero.  Mezcladas, un fallo no
+ * dice cual de las dos fue.
+ */
+#ifndef VXP_MSR_GUARDED
+#define VXP_MSR_GUARDED 0
+#endif
 
 /** @brief ¿Salio bien una llamada al kernel? */
 #define NT_SUCCESS(st) (((NTSTATUS)(st)) >= 0)
@@ -136,6 +174,91 @@ static status detect_on_cpu(USHORT group, ULONG bit, u32 index, pmu_caps *out) {
 }
 
 /**
+ * @brief Lee un MSR de verdad, para el volcado.
+ *
+ * Es lo unico que el volcado no puede hacer por su cuenta: `common/dump.c` no
+ * conoce ningun sistema, y a un MSR solo se llega desde anillo cero.  Entra por
+ * puntero a funcion para que el mismo fuente sirva aqui y en modo usuario.
+ */
+static msr_value dump_read_msr(u32 addr, void *ctx) {
+    msr_value v;
+    (void)ctx;
+    v.value = 0;
+    /* Con GUARDA: `msr_read_guarded` esta en `asm/x86_64/msr_guard.S` y
+     * sobrevive a leer un registro que no existe.  Es lo que permite mirar los
+     * 1.273 que el manual no documenta con condicion adyacente en vez de
+     * saltarselos -- sin el, cada uno de esos seria una pantalla azul. */
+    v.rc = msr_read_guarded(addr, &v.value) ? OK : ERR_FAULT;
+    return v;
+}
+
+/**
+ * @brief Recorre los procesadores logicos volcando CPUID o MSR a un CSV.
+ *
+ * @param msr distinto de cero para volcar los MSR; cero para CPUID.
+ *
+ * UN SOLO FICHERO CON TODOS LOS PROCESADORES, y la cabecera solo en el primero:
+ * repetirla en medio convierte la tabla en algo que ningun lector de CSV
+ * procesa de una pasada.  La columna `cpu` es la que hace que las filas de los
+ * veinticuatro convivan sin pisarse.
+ */
+static usize build_csv(char *buf, usize cap, int msr) {
+    usize len = 0;
+    ULONG total = KeQueryActiveProcessorCountEx(ALL_PROCESSOR_GROUPS);
+    ULONG emitted = 0;
+    USHORT group;
+
+    for (group = 0; group < 64u && emitted < total; ++group) {
+        ULONG in_group = KeQueryActiveProcessorCountEx(group);
+        ULONG bit;
+        for (bit = 0; bit < in_group && emitted < total; ++bit) {
+            GROUP_AFFINITY want;
+            GROUP_AFFINITY previous;
+            usize written = 0;
+            status rc;
+
+            want.Mask = ((KAFFINITY)1) << bit;
+            want.Group = group;
+            want.Reserved[0] = 0;
+            want.Reserved[1] = 0;
+            want.Reserved[2] = 0;
+            previous.Mask = 0;
+            previous.Group = 0;
+            previous.Reserved[0] = 0;
+            previous.Reserved[1] = 0;
+            previous.Reserved[2] = 0;
+
+            /* La afinidad se pone y se QUITA siempre, tambien si el volcado se
+             * queda sin sitio: dejar un hilo del sistema fijado a un nucleo no
+             * da un error, da una maquina que se comporta raro. */
+            KeSetSystemGroupAffinityThread(&want, &previous);
+            if (msr) {
+                rc = msr_dump(emitted, emitted == 0, VXP_MSR_GUARDED,
+                              dump_read_msr, 0, buf + len, cap - len,
+                              &written);
+            } else {
+                rc = cpuid_dump(emitted, emitted == 0, buf + len, cap - len,
+                                &written);
+            }
+            KeRevertToUserGroupAffinityThread(&previous);
+
+            len += written;
+            if (rc != OK) {
+                /* Se queda corto o el fabricante no esta en las tablas.  Se
+                 * dice EN el fichero: uno cortado que no lo diga parece
+                 * completo, y esa es la unica forma de fallar que no se ve. */
+                append_str(buf, cap, &len, "# truncated at cpu ");
+                append_u32(buf, cap, &len, emitted);
+                append_str(buf, cap, &len, "\n");
+                return len;
+            }
+            emitted += 1;
+        }
+    }
+    return len;
+}
+
+/**
  * @brief Recorre todos los procesadores logicos y compone el informe.
  * @return cuantos bytes de `buf` se usaron.
  *
@@ -193,17 +316,17 @@ static usize build_report(char *buf, usize cap) {
 }
 
 /**
- * @brief Escribe el informe en disco.
+ * @brief Escribe un bufer en un fichero, sobrescribiendo.
  * @return el estado de la llamada que fallara, o `STATUS_SUCCESS`.
  */
-static NTSTATUS write_report(const char *buf, usize len) {
+static NTSTATUS write_file(const WCHAR *path, const char *buf, usize len) {
     UNICODE_STRING name;
     OBJECT_ATTRIBUTES attributes;
     IO_STATUS_BLOCK iosb;
     HANDLE file = 0;
     NTSTATUS st;
 
-    RtlInitUnicodeString(&name, (const WCHAR *)REPORT_PATH);
+    RtlInitUnicodeString(&name, path);
 
     attributes.Length = (ULONG)sizeof(attributes);
     attributes.RootDirectory = 0;
@@ -270,9 +393,38 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT driver, PUNICODE_STRING registry_path) {
     }
 
     len = build_report(report, REPORT_BYTES);
-    st = write_report(report, len);
+    st = write_file(REPORT_PATH, report, len);
 
     ExFreePoolWithTag(report, REPORT_POOL_TAG);
+
+    /* Y los dos volcados completos, cada uno en su fichero.  Van con su propia
+     * reserva y no reusando la del informe porque son de otro orden de tamano:
+     * 1.588 MSR por 24 procesadores no caben en 256 KiB. */
+    {
+        char *csv = (char *)ExAllocatePoolWithTag(NonPagedPoolNx, CSV_BYTES,
+                                                  REPORT_POOL_TAG);
+        if (csv == 0) {
+            DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL,
+                       "vesta_prof: out of pool for the CSV dumps\n");
+        } else {
+            usize n;
+            NTSTATUS s;
+
+            n = build_csv(csv, CSV_BYTES, 0);
+            s = write_file(CPUID_CSV_PATH, csv, n);
+            DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL,
+                       "vesta_prof: cpuid csv %u bytes, status 0x%08X\n",
+                       (unsigned)n, (unsigned)s);
+
+            n = build_csv(csv, CSV_BYTES, 1);
+            s = write_file(MSR_CSV_PATH, csv, n);
+            DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL,
+                       "vesta_prof: msr csv %u bytes, status 0x%08X\n",
+                       (unsigned)n, (unsigned)s);
+
+            ExFreePoolWithTag(csv, REPORT_POOL_TAG);
+        }
+    }
 
     if (!NT_SUCCESS(st)) {
         /* El informe se construyo y no se pudo guardar.  Se dice por la traza,

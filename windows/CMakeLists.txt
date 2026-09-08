@@ -18,6 +18,15 @@
 # Aqui, y solo aqui, el enlace va desnudo.
 set(CMAKE_C_STANDARD_LIBRARIES "")
 
+# El guarda de lectura de MSR va en ensamblador, asi que hace falta el lenguaje.
+# Se habilita AQUI y no en la raiz: es lo unico del proyecto que lo necesita, y
+# pedirlo en la raiz obligaria a tener ensamblador para construir las pruebas.
+#
+# `ASM` -- no `ASM_MASM` -- porque este driver se construye con MinGW y sin WDK:
+# el ensamblador es `as`, y CMake lo invoca a traves del compilador de C, que es
+# justo lo que hace falta para que un `.S` pase antes por el preprocesador.
+enable_language(ASM)
+
 # -----------------------------------------------------------------------------
 #  La biblioteca de importacion, generada de NUESTRO `.def`.
 # -----------------------------------------------------------------------------
@@ -56,7 +65,21 @@ add_custom_target(vxp_ntoskrnl_import DEPENDS "${VXP_NTOSKRNL_IMPORT}")
 add_library(vesta_prof MODULE
         driver.c
         msr_win.c
-        ../common/pmu_caps.c)
+        ../common/pmu_caps.c
+        # El volcado y las tablas de los manuales.  Entran AQUI porque el valor
+        # de un MSR solo se puede leer desde anillo cero: dejar la lectura fuera
+        # obligaria a inventar un canal para pedirla, y el driver ya escribe un
+        # fichero.  Cuestan unos 100 KiB de datos de solo lectura, medidos.
+        ../common/dump.c
+        ../common/cpu_tables.c
+        ../common/cpuid/intel/table.c
+        ../common/cpuid/amd/table.c
+        ../common/msr/intel/table.c
+        ../common/msr/amd/table.c
+        # El guarda: lectura de MSR que sobrevive a un registro inexistente.
+        # Es lo que permite mirar los 1.273 que el manual no documenta con
+        # condicion adyacente, en vez de que cada uno sea una pantalla azul.
+        asm/x86_64/msr_guard.S)
 
 add_dependencies(vesta_prof vxp_ntoskrnl_import)
 
@@ -81,7 +104,19 @@ target_compile_options(vesta_prof PRIVATE
         -mno-red-zone
         # El comprobador de pila llama a funciones del CRT que aqui no hay.
         -fno-stack-protector
-        -fno-asynchronous-unwind-tables
+        # OJO: las tablas de desenrollado SI se emiten, y quitarlas fue un
+        # error.  En x64 no son "informacion de excepciones" opcional: son
+        # `.pdata`/`.xdata`, y sin ellas
+        #
+        #   - nadie puede RECORRER nuestros marcos.  Un volcado de fallo,
+        #     `!analyze` o la pila que pinta WinDbg se cortan al entrar aqui, y
+        #     que el driver que rompe las trazas sea justo el del PERFILADOR es
+        #     lo peor que podia pasar;
+        #   - y no hay donde colgar un guarda: una excepcion sin tabla es
+        #     KMODE_EXCEPTION_NOT_HANDLED, o sea pantalla azul.
+        #
+        # Medido sobre este mismo objetivo: 21.024 -> 22.120 bytes, 1 KiB de
+        # mas para .pdata (420 B) y .xdata (400 B).
         -Wall -Wextra)
 
 target_link_options(vesta_prof PRIVATE
