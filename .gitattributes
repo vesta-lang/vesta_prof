@@ -1,0 +1,64 @@
+# Que salto de linea lleva cada cosa al salir del historial.
+#
+# El repositorio se trabaja desde Windows con `core.autocrlf=true`, que convierte
+# a CRLF al sacar los ficheros.  Para el codigo da igual -- lo lee un compilador
+# --, pero hay ficheros a los que el salto de linea SI les cambia el
+# comportamiento, y el fallo que producen nunca menciona los saltos de linea.
+#
+# Este perfilador ademas se construye en los dos sistemas desde el mismo arbol,
+# asi que los dos casos conviven: unos ficheros tienen que llegar con saltos de
+# Unix y otros con los de Windows.  Por eso hay dos bloques y no uno.
+
+# --- Tienen que llegar con saltos de Unix ---------------------------------
+#
+# EL CASO GRAVE ES `kbuild`.  El modulo de Linux no lo construye CMake sino el
+# sistema de construccion del propio kernel, con `Makefile` y `Kbuild`, y `make`
+# no tolera CRLF: el `\r` se queda pegado al final del valor de cada variable.
+# Un `obj-m := vesta_prof.o\r` no da un error de sintaxis -- busca un fichero
+# cuyo nombre acaba en retorno de carro y dice que no existe.  Se pierde la
+# tarde antes de sospechar del salto de linea.
+#
+# Lo mismo con `sh`: el `\r` se cuela dentro de la ultima palabra de cada linea y
+# el interprete ve un token que nadie escribio.  Y con el guion de Python, que
+# lleva `#!/usr/bin/env python3`: en Linux, un shebang terminado en `\r` hace que
+# el nucleo busque un interprete llamado "python3\r" y conteste "bad
+# interpreter", que tampoco apunta a donde esta el problema.
+#
+# Se marcan por extension y tambien por nombre, porque los ficheros de `make` no
+# llevan extension.
+*.sh          text eol=lf
+*.bash        text eol=lf
+*.py          text eol=lf
+*.mk          text eol=lf
+Makefile      text eol=lf
+Kbuild        text eol=lf
+
+# El fichero de exportaciones del que sale la biblioteca de importacion del
+# `.sys`.  Lo lee `dlltool`, y aunque hoy lo digiere con CRLF, es una entrada de
+# una herramienta que analiza linea a linea: no es sitio para depender de eso.
+*.def         text eol=lf
+
+# --- Y estos, con los de Windows ------------------------------------------
+#
+# El sentido contrario, que es menos conocido.  `cmd.exe` lee los `.bat`/`.cmd`
+# por posicion de byte dentro del fichero, y con saltos de Unix hay versiones que
+# se equivocan al continuar despues de un `goto` o una etiqueta: saltan a media
+# linea y ejecutan un trozo de orden.  No falla siempre, que es lo peor que
+# puede hacer.
+#
+# Aqui importa de verdad: `dev_setup.cmd` se auto-eleva y toca el almacen de
+# certificados de la maquina.  Una orden partida por la mitad ahi no es un fallo
+# de construccion.
+*.cmd         text eol=crlf
+*.bat         text eol=crlf
+
+# --- Que NO se toque -------------------------------------------------------
+#
+# Material de firma y binarios.  Estan en `.gitignore` y no deberian llegar
+# nunca, pero si alguien anade uno a la fuerza, convertirle los saltos de linea
+# lo corrompe en silencio.  La red de seguridad es barata.
+*.pfx         binary
+*.cer         binary
+*.cat         binary
+*.sys         binary
+*.ko          binary
