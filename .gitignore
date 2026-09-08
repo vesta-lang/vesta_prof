@@ -1,0 +1,87 @@
+# Directorios de construccion
+build/
+cmake-build-*/
+out/
+
+# Artefactos
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dll
+*.dylib
+*.exe
+*.pdb
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+compile_commands.json
+
+# --- El lado de Linux: kbuild construye DENTRO del arbol -------------------
+#
+# A diferencia de CMake, el sistema de construccion del kernel no tiene un
+# directorio de salida aparte: deja sus intermedios al lado del fuente.  Sin
+# estas lineas, cada compilacion del modulo ensucia el repositorio con ficheros
+# que no son de nadie.
+*.ko
+*.mod
+*.mod.c
+*.symvers
+*.order
+.tmp_versions/
+.*.cmd
+
+# --- El lado de Windows: firma y empaquetado ------------------------------
+#
+# Un driver no carga sin firma, asi que en desarrollo se genera un certificado
+# de pruebas.  Es de la maquina que lo creo y NO debe viajar: un certificado en
+# un repositorio es una llave publicada.
+*.sys
+*.cat
+*.cer
+*.pfx
+*.inf.bak
+
+# Todo el material de firma que genera `tools/make_dev_cert.py`, por directorio
+# y no solo por extension: una clave privada suelta ahi dentro con un nombre que
+# no previmos seguiria siendo una clave publicada.
+.devcert/
+
+# --- Registros de corrida --------------------------------------------------
+#
+# Lo que produce el perfilador y lo que las herramientas hacen con ello.  Son
+# MEDICIONES de una corrida concreta: no se reproducen desde el repositorio y no
+# dicen nada fuera de la maquina, el binario y el momento en que salieron.  Lo
+# que si se versiona son las lineas base de `bench/baseline`, que estan fechadas
+# y etiquetadas con su maquina a proposito.
+*.vprof
+*.vprof.json
+samples.csv
+report.html
+
+# Python -- lo genera la herramienta de `tools/`, y son artefactos: el
+# bytecode compilado se reconstruye solo, y un entorno virtual es de la
+# maquina de quien lo creo, no del proyecto.
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Editores
+.vscode/
+.idea/
+
+# La referencia generada con Doxygen: se genera, no se versiona.
+doc/out/
