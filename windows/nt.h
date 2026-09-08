@@ -286,6 +286,64 @@ void KeSetSystemGroupAffinityThread(PGROUP_AFFINITY Affinity,
                                     PGROUP_AFFINITY PreviousAffinity);
 void KeRevertToUserGroupAffinityThread(PGROUP_AFFINITY PreviousAffinity);
 
+/**
+ * @brief
+ * \~english Which logical processor this code is running on, system-wide.
+ * \~spanish En que procesador logico corre esto, contando toda la maquina.
+ * \~
+ *
+ * \~english
+ * The argument is optional and asks for the pair (group, number within the
+ * group).  Passing nothing gives the flat index, which is the one that indexes
+ * an array.
+ *
+ * \~spanish
+ * El argumento es opcional y pide la pareja (grupo, numero dentro del grupo).
+ * Sin el se obtiene el indice plano, que es el que sirve para indexar un array.
+ */
+ULONG KeGetCurrentProcessorNumberEx(void *ProcNumber);
+
+/**
+ * @brief
+ * \~english Runs one function on EVERY processor, all at the same time.
+ * \~spanish Ejecuta una funcion en TODOS los procesadores, a la vez.
+ * \~
+ *
+ * \~english
+ * WHAT IT IS FOR, AND WHY IT IS NOT THE SAME AS WALKING WITH AFFINITY.  Pinning
+ * a thread to each processor in turn also lets you touch each one, but it does
+ * so at PASSIVE_LEVEL and one at a time: between reading a register and writing
+ * it back this thread can be preempted, and somebody else's change gets
+ * clobbered.
+ *
+ * This one raises to IPI_LEVEL and HOLDS the other processors while the
+ * function runs.  Nothing else runs anywhere.  It is what a read-modify-write on
+ * a per-processor control register needs, and it is why the counters -- which
+ * are only touched at PASSIVE and only by us -- do not need it.
+ *
+ * INSIDE, ALMOST NOTHING IS LEGAL: no allocation, no lock, no paged memory.  It
+ * is the same rule as the interrupt handler, for the same reason.
+ *
+ * \~spanish
+ * PARA QUE SIRVE, Y POR QUE NO ES LO MISMO QUE RECORRER CON AFINIDAD.  Fijar un
+ * hilo a cada procesador por turno tambien permite tocarlos todos, pero lo hace
+ * a PASSIVE_LEVEL y de uno en uno: entre leer un registro y volver a escribirlo,
+ * a este hilo lo pueden expropiar, y el cambio de otro se pisa.
+ *
+ * Esta sube a IPI_LEVEL y RETIENE a los demas procesadores mientras la funcion
+ * corre.  No corre nada mas en ningun sitio.  Es lo que necesita un
+ * leer-modificar-escribir sobre un registro de control por procesador, y es la
+ * razon de que los contadores -- que solo se tocan a PASSIVE y solo por
+ * nosotros -- no lo necesiten.
+ *
+ * DENTRO NO ES LEGAL CASI NADA: ni reservar, ni un cerrojo, ni memoria
+ * paginada.  Es la misma regla que en el manejador de interrupcion, y por lo
+ * mismo.
+ */
+typedef ULONG_PTR (*PKIPI_BROADCAST_WORKER)(ULONG_PTR Argument);
+ULONG_PTR KeIpiGenericCall(PKIPI_BROADCAST_WORKER BroadcastFunction,
+                           ULONG_PTR Context);
+
 /* -------------------------------------------------------------------------
  *  \~english
  *  Files, to get the report out.

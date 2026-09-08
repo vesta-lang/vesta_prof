@@ -65,6 +65,11 @@ add_custom_target(vxp_ntoskrnl_import DEPENDS "${VXP_NTOSKRNL_IMPORT}")
 add_library(vesta_prof MODULE
         driver.c
         msr_win.c
+        # `CR4.PCE`: dejar que el anillo tres lea los contadores con `rdpmc`.
+        # Va en su propio fichero porque es un trabajo distinto del de contar y
+        # toca un registro de la MAQUINA, no uno nuestro -- y eso pide su propia
+        # explicacion de por que se retiene a los demas procesadores.
+        pce.c
         ../common/probe/pmu_caps.c
         # El volcado y las tablas de los manuales.  Entran AQUI porque el valor
         # de un MSR solo se puede leer desde anillo cero: dejar la lectura fuera
@@ -76,6 +81,12 @@ add_library(vesta_prof MODULE
         ../common/cpuid/amd/table.c
         ../common/msr/intel/table.c
         ../common/msr/amd/table.c
+        # Contar: los eventos arquitectonicos y la secuencia de armar y
+        # desarmar.  `events.c` lo necesitan LOS DOS -- el informe, para
+        # imprimir la codificacion, y el contador, para escribirla --, que es
+        # justo la razon de que la tabla sea una sola.
+        ../common/count/events.c
+        ../common/count/counter.c
         # El guarda: lectura de MSR que sobrevive a un registro inexistente.
         # Es lo que permite mirar los 1.273 que el manual no documenta con
         # condicion adyacente, en vez de que cada uno sea una pantalla azul.

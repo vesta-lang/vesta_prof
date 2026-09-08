@@ -34,6 +34,15 @@ KeQueryActiveProcessorCountEx
 KeSetSystemGroupAffinityThread
 KeRevertToUserGroupAffinityThread
 
+; --- todos los procesadores A LA VEZ -----------------------------------------
+; Recorrer con afinidad basta para leer y para escribir lo que es solo nuestro.
+; No basta para leer-modificar-escribir un registro de CONTROL, que es de la
+; maquina: entre la lectura y la escritura cabe una expropiacion, y el cambio de
+; otro se pisa.  `KeIpiGenericCall` retiene a los demas procesadores mientras
+; corre, y por eso es la via para CR4.
+KeIpiGenericCall
+KeGetCurrentProcessorNumberEx
+
 ; --- contexto ----------------------------------------------------------------
 ; Para AFIRMAR el IRQL en depuracion, no para cambiarlo.
 KeGetCurrentIrql

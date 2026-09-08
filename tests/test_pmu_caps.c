@@ -102,6 +102,21 @@ status msr_write(u32 index, u64 value) {
 }
 
 /** @brief Deja el falso en un estado conocido antes de cada caso. */
+/* Busca un trozo de texto dentro del informe.  Se escribe aqui porque el test
+ * no enlaza la biblioteca estandar del sistema por comodidad sino lo justo, y
+ * son ocho lineas. */
+static int contains(const char *hay, const char *needle) {
+    int i, j;
+    for (i = 0; hay[i] != 0; ++i) {
+        for (j = 0; needle[j] != 0 && hay[i + j] == needle[j]; ++j) {
+        }
+        if (needle[j] == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void fake_reset(void) {
     int i;
     g_fake.fault_everything = 0;
@@ -284,6 +299,20 @@ int main(void) {
         CHECK(pmu_caps_format(&caps, buf, sizeof(buf), &written) == OK);
         CHECK(written > 0);
         CHECK(written < sizeof(buf));
+
+        /* La codificacion de los eventos, que ya no es una cadena escrita a
+         * mano sino dos numeros formateados.  Se mira porque ese cambio ya
+         * mordio una vez: el ayudante de hexadecimal YA pone el prefijo, y
+         * anadirlo otra vez daba `0x0x3C`.  No es un fallo que se note al
+         * compilar ni al ejecutar -- solo al leer el informe, y solo si alguien
+         * mira esa columna. */
+        buf[written] = 0;
+        CHECK(contains(buf, "CORE_CYC        core cycles  0x3C/0x00"));
+        CHECK(contains(buf, "BR_MISPRED_RET  branch mispredicts retired  0xC5/0x00"));
+        CHECK(!contains(buf, "0x0x"));
+        /* Y los que no tienen codificacion siguen diciendolo, en vez de dejar
+         * la columna vacia, que se leeria como que nadie miro. */
+        CHECK(contains(buf, "LBR_INSERTS     LBR inserts  (microarchitecture-specific)"));
     }
 
     /* El volcado real de esta maquina.  No se comprueba nada de el -- los

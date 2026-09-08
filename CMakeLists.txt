@@ -206,7 +206,8 @@ if (VXP_BUILD_TESTS)
     # lados de kernel.
     add_executable(test_pmu_caps
             tests/test_pmu_caps.c
-            common/probe/pmu_caps.c)
+            common/probe/pmu_caps.c
+            common/count/events.c)
     target_link_libraries(test_pmu_caps PRIVATE vxp_base)
     target_include_directories(test_pmu_caps PRIVATE common)
     set_target_properties(test_pmu_caps PROPERTIES
@@ -285,6 +286,34 @@ if (VXP_BUILD_TESTS)
         target_compile_options(test_ring PRIVATE -Wall -Wextra -pedantic-errors)
     endif ()
     add_test(NAME ring COMMAND test_ring)
+
+    # La secuencia de armar y desarmar contadores, tambien SIN driver.
+    #
+    # Lo que se compra aqui es poder comprobar el ORDEN.  El manual exige apagar
+    # el selector antes de escribir el contador, y equivocarse no da excepcion ni
+    # error: el contador coge un valor que nadie pidio y la medida sale mal por
+    # una cantidad plausible.  El banco de MSR de mentira apunta cada escritura y
+    # el test recorre el registro, que es la unica forma de ver un orden -- el
+    # estado final es identico fuera cual fuera.
+    #
+    # No enlaza `pmu_caps.c`: el modulo solo LEE campos de esa estructura, asi
+    # que basta la cabecera y el test fabrica las capacidades que quiere probar,
+    # incluidas las que esta maquina no tiene.
+    add_executable(test_counter
+            tests/test_counter.c
+            common/count/counter.c
+            common/count/events.c)
+    target_link_libraries(test_counter PRIVATE vxp_base)
+    target_include_directories(test_counter PRIVATE common)
+    set_target_properties(test_counter PROPERTIES
+            C_STANDARD 11 C_STANDARD_REQUIRED ON)
+    if (MSVC)
+        target_compile_options(test_counter PRIVATE /W4)
+    else ()
+        target_compile_options(test_counter PRIVATE -Wall -Wextra -pedantic-errors)
+    endif ()
+    add_test(NAME counter COMMAND test_counter)
+
 
     # Y el volcado como binario, que es para lo que sirve: pegarlo en un informe
     # de fallo o comparar dos maquinas.  Sin privilegios, asi que los MSR salen

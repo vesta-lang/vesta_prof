@@ -45,6 +45,7 @@
 
 #include "pmu_caps.h"
 
+#include "count/events.h"
 #include "cpuid/intrin.h"
 #include "msr/access.h"
 #include "writer.h"
@@ -578,95 +579,41 @@ const char *pmu_caps_core_class_name(u32 core_type) {
     }
 }
 
-/** @brief
- *  \~english The architectural events, in EBX's bit order.
- *  \~spanish Los eventos arquitectonicos, en el orden de los bits de EBX. \~ */
 /**
  * @brief
- * \~english How many architectural events the CPUID.0AH bitmap enumerates.
- * \~spanish Cuantos eventos arquitectonicos enumera el mapa de bits de
- *           CPUID.0AH.
+ * \~english Pads a name to the report's column, so the prose lines up.
+ * \~spanish Rellena un nombre hasta la columna del informe, para que la prosa
+ *           quede alineada.
  * \~
  *
  * \~english
- * THIRTEEN, not seven.  The classic seven are the ones everybody knows, and that
- * is why the code carried eight entries: the seven plus the topdown slots.  The
- * manual enumerates six more -- the full topdown breakdown and the LBR
- * insertions -- and without walking them all the report would say "not
- * enumerated" about something the part does have.
- *
- * It is the reason for taking these tables from the manual and not from memory:
- * what one remembers is what was there when one learnt it.
+ * The names and their encoding used to live here, pre-padded, as two arrays of
+ * strings.  They live in `count/events.h` now, as numbers, because the module
+ * that ARMS a counter needs the same pair this one only PRINTS -- and two copies
+ * of an encoding drift without anything failing: the counter simply counts
+ * something else.  What stays here is the padding, which is presentation and
+ * belongs to whoever formats.
  *
  * \~spanish
- * TRECE, no siete.  Los siete clasicos son los que todo el mundo conoce, y por
- * eso el codigo llevaba ocho entradas: los siete y las ranuras de topdown.  El
- * manual enumera seis mas -- el reparto de topdown al completo y las
- * inserciones de LBR --, y sin recorrerlos todos el informe diria "no
- * enumerado" de algo que la pieza si tiene.
- *
- * Es el motivo de sacar estas tablas del manual y no de la memoria: lo que uno
- * recuerda es lo que habia cuando lo aprendio.
+ * Los nombres y su codificacion vivian aqui, ya rellenados, como dos arrays de
+ * cadenas.  Ahora viven en `count/events.h`, como numeros, porque el modulo que
+ * ARMA un contador necesita la misma pareja que este solo IMPRIME -- y dos
+ * copias de una codificacion se separan sin que falle nada: simplemente el
+ * contador cuenta otra cosa.  Lo que se queda aqui es el relleno, que es
+ * presentacion y es de quien formatea.
  */
-#define ARCH_EVENT_MAX 13
+#define ARCH_EVENT_COLUMN 16u
 
-/** @brief
- *  \~english The name the manual gives them, in EBX's bit order.
- *  \~spanish El nombre que les da el manual, en el orden de los bits de
- *            EBX. \~ */
-static const char *const arch_event_name[ARCH_EVENT_MAX] = {
-        "CORE_CYC        core cycles",
-        "INTR_RET        instructions retired",
-        "REF_CYC         reference cycles",
-        "LLC_CYC         LLC references",
-        "LLC_MISSES      LLC misses",
-        "BR_INSTR_RET    branch instructions retired",
-        "BR_MISPRED_RET  branch mispredicts retired",
-        "SLOTS           topdown slots",
-        "BACKEND         topdown backend bound",
-        "BADSPEC         topdown bad speculation",
-        "FRONTEND        topdown frontend bound",
-        "RETIRING        topdown retiring",
-        "LBR_INSERTS     LBR inserts"};
-
-/**
- * @brief
- * \~english Their encoding, where it is known.
- * \~spanish Su codificacion, donde se conoce.
- * \~
- *
- * \~english
- * An ENCODING is the pair (event, umask) written into the selector to ask the
- * counter for that event.
- *
- * The first seven come from the architectural events table and are checked.  For
- * the last six **nothing is put**: the topdown breakdown is not read through an
- * event selector but through the metrics register, and the encoding of the LBR
- * insertions is specific to each microarchitecture.
- *
- * Writing a plausible number there would be exactly the mistake this module
- * exists not to make.  When it is needed, it comes from the
- * per-microarchitecture tables, not from memory.
- *
- * \~spanish
- * Una CODIFICACION es la pareja (evento, umask) que se escribe en el selector
- * para pedirle al contador ese evento.
- *
- * Los siete primeros salen de la tabla de eventos arquitectonicos y estan
- * contrastados.  De los seis ultimos **no se pone nada**: el reparto de topdown
- * no se lee por un selector de evento sino por el registro de metricas, y la
- * codificacion de las inserciones de LBR es propia de cada microarquitectura.
- *
- * Escribir un numero plausible ahi seria justo el fallo que este modulo existe
- * para no cometer.  Cuando haga falta, sale de las tablas por microarquitectura,
- * no de la memoria.
- */
-static const char *const arch_event_encoding[ARCH_EVENT_MAX] = {
-        "0x3C/0x00", "0xC0/0x00", "0x3C/0x01", "0x2E/0x4F",
-        "0x2E/0x41", "0xC4/0x00", "0xC5/0x00", "0xA4/0x01",
-        "(microarchitecture-specific)", "(microarchitecture-specific)",
-        "(microarchitecture-specific)", "(microarchitecture-specific)",
-        "(microarchitecture-specific)"};
+static void put_padded(writer *w, const char *s, int column) {
+    int n = 0;
+    while (s[n] != 0) {
+        n += 1;
+    }
+    put_str(w, s);
+    if (n < column) {
+        put_pad(w, column - n);
+    }
+}
 
 /** @brief
  *  \~english Appends "yes"/"no" according to a flag.
@@ -735,9 +682,26 @@ status pmu_caps_format(const pmu_caps *caps, char *buf, usize cap,
         } else {
             put_str(&w, "[ok]             ");
         }
-        put_str(&w, arch_event_name[i]);
+        put_padded(&w, arch_events[i].name, ARCH_EVENT_COLUMN);
+        put_str(&w, arch_events[i].text);
         put_str(&w, "  ");
-        put_str(&w, arch_event_encoding[i]);
+        /* \~english The pair is printed only where it is known.  Where it is
+         * not, saying so is the honest output: an empty column would read as if
+         * nobody had looked.
+         * \~spanish La pareja se imprime solo donde se conoce.  Donde no,
+         * decirlo es la salida honesta: una columna vacia se leeria como si
+         * nadie hubiera mirado. \~ */
+        if (arch_events[i].flags & ARCH_EVENT_ENCODED) {
+            /* \~english `put_hex` already writes the `0x`; adding another one
+             * here is what produced `0x0x3C` in the first version.
+             * \~spanish `put_hex` ya escribe el `0x`; anadir otro aqui es lo que
+             * producia `0x0x3C` en la primera version. \~ */
+            put_hex(&w, arch_events[i].event, 2);
+            put_ch(&w, '/');
+            put_hex(&w, arch_events[i].umask, 2);
+        } else {
+            put_str(&w, "(microarchitecture-specific)");
+        }
         put_ch(&w, '\n');
     }
 
