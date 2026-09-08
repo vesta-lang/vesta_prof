@@ -32,6 +32,30 @@ inexplicados", la primera pregunta razonable es *"¿como sabes que la parte
 explicada esta bien?"*. Tener por respuesta una medida en la maquina de quien
 pregunta no es lo mismo que decir que lo pone en una tabla.
 
+### Un ejemplo real de lo que encuentra
+
+Una fila de la tabla es una forma de instruccion, y una forma **no fija el modo
+de direccionamiento**. `MOV_GPRv_MEMv/64x64` es una latencia; escribir la
+direccion tiene tres maneras:
+
+```text
+                  [rax]     [rax+8]   [rax+rcx*8]    la tabla dice
+    nucleo P      5,002      5,002       5,002           5,000
+    nucleo E      3,001      3,001       4,001           4,000
+```
+
+En el nucleo grande los tres cuestan lo mismo y no hay nada que discutir. En el
+pequeno hay un camino rapido para el direccionamiento simple, y el valor de la
+tabla resulta ser el del modo **con indice**.
+
+La tabla no esta mal. Lo que pasa es que un bucle con muchas cargas simples en
+un nucleo pequeno se costearia un 33% de mas, y su residuo saldria **negativo**:
+el codigo pareceria mas rapido de lo posible.
+
+Por eso, cuando varios nucleos miden la misma fila y discrepan **entre si**, el
+banco lo dice en vez de acusar a la tabla. Un desvio contra una fila que no puede
+describir las dos medidas no es un error de la tabla; es una pregunta mal hecha.
+
 ## Necesita el driver cargado
 
 Lee los contadores con `rdpmc`, que solo es legal en modo usuario si algo ha

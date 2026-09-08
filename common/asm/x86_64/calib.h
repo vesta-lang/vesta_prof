@@ -224,11 +224,58 @@ void calib_imul_lat(void);
  *  \~spanish Seis `imul` independientes: cuantos caben por ciclo. \~ */
 void calib_imul_tp(void);
 
+/**
+ * @brief
+ * \~english The same load, through the three ways of writing an address.
+ * \~spanish La misma carga, por las tres formas de escribir una direccion.
+ * \~
+ *
+ * \~english
+ * A FORM OF THE TABLE DOES NOT PIN DOWN THE ADDRESSING MODE, and that is what
+ * these three are for.  `MOV_GPRv_MEMv/64x64` is one row -- one latency -- but
+ * the machine does not have to take the same time for `(%rax)`, for
+ * `8(%rax)` and for `(%rax,%rcx,8)`: several parts have a fast path for the
+ * simple form and charge an extra cycle for an index.
+ *
+ * So when a measurement disagrees with that row, there are two explanations and
+ * they are not the same thing:
+ *
+ *   the table is off for this part      -> the three measure the same
+ *   the row describes another mode      -> the three come out different, and
+ *                                          one of them matches the row
+ *
+ * Without the three, a discrepancy has no way of telling which it is, and
+ * calling a table wrong when what differs is the way one wrote the address is
+ * exactly the kind of confident mistake this whole tree is arranged to avoid.
+ *
+ * \~spanish
+ * UNA FORMA DE LA TABLA NO FIJA EL MODO DE DIRECCIONAMIENTO, y para eso estan
+ * estas tres.  `MOV_GPRv_MEMv/64x64` es una fila -- una latencia -- pero la
+ * maquina no tiene por que tardar lo mismo con `(%rax)`, con `8(%rax)` y con
+ * `(%rax,%rcx,8)`: varias piezas tienen un camino rapido para la forma simple y
+ * cobran un ciclo de mas por un indice.
+ *
+ * Asi que cuando una medida discrepa de esa fila hay dos explicaciones, y no son
+ * la misma cosa: ver el cuadro de arriba.  Sin las tres, un desvio no tiene como
+ * decir cual de las dos es, y llamar equivocada a una tabla cuando lo que
+ * difiere es como se escribio la direccion es justo la clase de error confiado
+ * que este arbol entero esta dispuesto para no cometer.
+ */
+
 /** @brief
- *  \~english A load that feeds its own address: latency of the first cache.
- *  \~spanish Una carga que alimenta su propia direccion: latencia de la primera
- *            cache. \~ */
+ *  \~english `mov (%rax), %rax`: base register and nothing else.
+ *  \~spanish `mov (%rax), %rax`: registro base y nada mas. \~ */
 void calib_load_lat(void);
+
+/** @brief
+ *  \~english `mov 8(%rax), %rax`: base plus a small displacement.
+ *  \~spanish `mov 8(%rax), %rax`: base mas un desplazamiento pequeno. \~ */
+void calib_load_disp(void);
+
+/** @brief
+ *  \~english `mov (%rax,%rcx,8), %rax`: base plus scaled index.
+ *  \~spanish `mov (%rax,%rcx,8), %rax`: base mas indice escalado. \~ */
+void calib_load_index(void);
 
 #endif /* __ASSEMBLER__ */
 

@@ -174,7 +174,22 @@ static const kernel kernels[] = {
      "IMUL_GPRv_GPRv/64x64", 1},
     {"imul.tp", calib_imul_tp, "imul r64,r64  throughput", 0.4, 2.0, 2704,
      "IMUL_GPRv_GPRv/64x64", 0},
-    {"load.lat", calib_load_lat, "mov r64,[r64]  latencia L1", 3.0, 8.0, 1033,
+    /* \~english The three go against the SAME row of the table, and that is the
+     * point: `MOV_GPRv_MEMv/64x64` is one latency and there are three ways of
+     * writing the address.  If the three measure the same, the row describes
+     * them all and a discrepancy is the table's.  If they come out different,
+     * the row describes one of them and comparing against the other two was
+     * never going to agree.
+     * \~spanish Las tres van contra la MISMA fila de la tabla, y ese es el
+     * asunto: `MOV_GPRv_MEMv/64x64` es una latencia y hay tres formas de
+     * escribir la direccion.  Si las tres miden lo mismo, la fila las describe a
+     * todas y un desvio es de la tabla.  Si salen distintas, la fila describe a
+     * una y compararse con las otras dos no iba a cuadrar nunca. \~ */
+    {"load.base", calib_load_lat, "mov r64,[r64]         L1", 2.0, 8.0, 1033,
+     "MOV_GPRv_MEMv/64x64", 1},
+    {"load.disp", calib_load_disp, "mov r64,[r64+8]       L1", 2.0, 8.0, 1033,
+     "MOV_GPRv_MEMv/64x64", 1},
+    {"load.index", calib_load_index, "mov r64,[r64+r64*8]   L1", 2.0, 9.0, 1033,
      "MOV_GPRv_MEMv/64x64", 1}};
 
 /** @brief
@@ -400,9 +415,70 @@ static int compare(const char *path, const double *medido) {
                kernels[k].uid, dice, medido[k], desvio);
     }
 
+    /* \~english BEFORE BLAMING THE TABLE, look at whether we handed it an
+     * impossible question.  Several kernels can measure the SAME row -- three
+     * ways of writing one address are one form -- and if those kernels disagree
+     * with each other, no single number in the row can match all three.  Then
+     * what differs is not the table: it is that a form does not pin down what
+     * was measured.
+     *
+     * It happens for real: on this machine's E core the same load takes 3 cycles
+     * with simple addressing and 4 with a scaled index, and the table says 4.
+     * Calling that a 25% error would have been confidently wrong.
+     *
+     * \~spanish ANTES DE CULPAR A LA TABLA, mirar si le hemos hecho una pregunta
+     * imposible.  Varios nucleos pueden medir la MISMA fila -- tres formas de
+     * escribir una direccion son una sola forma --, y si esos nucleos discrepan
+     * ENTRE SI, ningun numero de la fila puede cuadrar con los tres.  Entonces lo
+     * que difiere no es la tabla: es que una forma no fija lo que se midio.
+     *
+     * Pasa de verdad: en el nucleo E de esta maquina la misma carga cuesta 3
+     * ciclos con direccionamiento simple y 4 con indice escalado, y la tabla dice
+     * 4.  Llamar a eso un error del 25% habria sido equivocarse con aplomo. \~ */
+    {
+        usize i, j;
+        int ambiguas = 0;
+        for (i = 0; i < KERNEL_COUNT; ++i) {
+            if (kernels[i].form == 0) {
+                continue;
+            }
+            for (j = i + 1; j < KERNEL_COUNT; ++j) {
+                double a1, b1;
+                if (kernels[j].form != kernels[i].form ||
+                    kernels[j].is_latency != kernels[i].is_latency) {
+                    continue;
+                }
+                a1 = medido[i];
+                b1 = medido[j];
+                if (a1 <= 0.0 || b1 <= 0.0) {
+                    continue;
+                }
+                if (a1 / b1 > 1.05 || b1 / a1 > 1.05) {
+                    if (!ambiguas) {
+                        printf("\n  OJO: hay nucleos que miden la MISMA forma y "
+                               "no coinciden entre si.\n"
+                               "  Una fila de la tabla no puede describir a los "
+                               "dos, asi que el desvio\n"
+                               "  no dice que la tabla se equivoque: dice que la "
+                               "forma no fija lo\n"
+                               "  que se midio.\n");
+                    }
+                    printf("    %-11s %8.3f   frente a   %-11s %8.3f   (%s)\n",
+                           kernels[i].name, a1, kernels[j].name, b1,
+                           kernels[i].uid);
+                    ambiguas += 1;
+                }
+            }
+        }
+        if (ambiguas) {
+            return 1;
+        }
+    }
+
     if (malos) {
         printf("\n  %d formas se apartan mas de un 5%%.  Con el banco dentro de\n"
-               "  rango, lo que se aparta de la maquina es la TABLA.\n",
+               "  rango y sin formas ambiguas, lo que se aparta de la maquina es\n"
+               "  la TABLA.\n",
                malos);
         return 1;
     }

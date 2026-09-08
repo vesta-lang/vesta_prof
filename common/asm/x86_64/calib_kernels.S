@@ -275,7 +275,68 @@ calib_load_lat:
     jnz 9b
     ret
 
+/*
+ * \~english The same chase, written with a displacement.
+ *
+ * The cell holds its own address MINUS the displacement, so that reading
+ * `8(%rax)` gives back exactly the `%rax` the next one needs.  It looks like a
+ * riddle and it is only arithmetic:
+ *
+ * @code
+ *      rax = &cell_d - 8
+ *      mov 8(%rax), %rax     reads &cell_d, which holds &cell_d - 8
+ *      rax = &cell_d - 8     the same as before -> the chain closes
+ * @endcode
+ *
+ * \~spanish La misma persecucion, escrita con desplazamiento.
+ *
+ * La celda guarda su propia direccion MENOS el desplazamiento, para que leer
+ * `8(%rax)` devuelva exactamente el `%rax` que necesita la siguiente.  Parece un
+ * acertijo y es solo aritmetica: ver el cuadro de arriba.
+ */
+    .globl calib_load_disp
+    .p2align 4
+calib_load_disp:
+    movq $CALIB_ITERS, %r11
+    leaq calib_cell_d(%rip), %rax
+    subq $8, %rax
+    .p2align 4
+9:
+    .rept CALIB_UNROLL
+    movq 8(%rax), %rax
+    .endr
+    decq %r11
+    jnz 9b
+    ret
+
+/*
+ * \~english And with a scaled index.  The index is ZERO on purpose: what is
+ * being measured is whether the mode costs more, not whether walking an array
+ * does.  With a non-zero index the load would land on another line and what
+ * came back would be a cache miss instead of an addressing mode.
+ * \~spanish Y con indice escalado.  El indice es CERO a proposito: lo que se
+ * mide es si el modo cuesta mas, no si recorrer un array cuesta.  Con un indice
+ * distinto de cero la carga caeria en otra linea y lo que volveria seria un
+ * fallo de cache en vez de un modo de direccionamiento. \~
+ */
+    .globl calib_load_index
+    .p2align 4
+calib_load_index:
+    movq $CALIB_ITERS, %r11
+    leaq calib_cell(%rip), %rax
+    xorl %ecx, %ecx
+    .p2align 4
+9:
+    .rept CALIB_UNROLL
+    movq (%rax,%rcx,8), %rax
+    .endr
+    decq %r11
+    jnz 9b
+    ret
+
     .data
     .p2align 3
 calib_cell:
     .quad calib_cell
+calib_cell_d:
+    .quad calib_cell_d - 8
