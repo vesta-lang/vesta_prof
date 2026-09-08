@@ -120,7 +120,8 @@ typedef struct pmu_caps {
     u8 has_hybrid;        /**< la pieza mezcla nucleos P y E             */
     u8 has_invariant_tsc; /**< el TSC no cambia de ritmo                 */
     u8 has_ibs;           /**< AMD: Instruction Based Sampling           */
-    u8 _pad[2];
+    u8 has_hw_feedback;   /**< existen APERF y MPERF                     */
+    u8 has_rdtscp;        /**< existe `rdtscp`, y con el IA32_TSC_AUX    */
 
     /* --- lo que CPUID no puede desmentir: los MSR ------------------------ */
     msr_value misc_enable;      /**< IA32_MISC_ENABLE                     */
@@ -129,9 +130,28 @@ typedef struct pmu_caps {
     msr_value fixed_ctr_ctrl;   /**< IA32_FIXED_CTR_CTRL                  */
     msr_value perf_global_ctrl; /**< IA32_PERF_GLOBAL_CTRL                */
 
-    /* --- lo derivado, ya masticado -------------------------------------- */
-    u8 pebs_unavailable_bit; /**< bit 12 de MISC_ENABLE; solo si su rc==OK */
-    u8 pebs_record_format;   /**< PERF_CAPABILITIES[3:0]; 0 = no hay PEBS  */
+    /* --- lo derivado de IA32_MISC_ENABLE --------------------------------- */
+    u8 perfmon_available;    /**< bit 7: se puede monitorizar             */
+    u8 bts_unavailable;      /**< bit 11: sin Branch Trace Store          */
+    u8 pebs_unavailable_bit; /**< bit 12: la palabra autorizada sobre PEBS */
+
+    /* --- lo derivado de IA32_PERF_CAPABILITIES ---------------------------
+     *
+     * Se decodifica ENTERO y no solo el campo que hacia falta, porque leer un
+     * registro y quedarse con un bit es como se llega a conclusiones sueltas:
+     * que BTS y PEBS caigan LOS DOS es una explicacion -- los dos cuelgan del
+     * Debug Store --, mientras que "el bit 12 dice que no" es un dato huerfano.
+     */
+    u8 lbr_format;         /**< bits 5:0.  0 = no hay LBR                  */
+    u8 pebs_record_format; /**< bits 11:8.  NO son los bits bajos          */
+    u8 pebs_trap;          /**< bit 6                                       */
+    u8 pebs_arch_regs;     /**< bit 7                                       */
+    u8 smm_freeze;         /**< bit 12                                      */
+    u8 full_width_write;   /**< bit 13: contadores de ancho completo        */
+    u8 pebs_baseline;      /**< bit 14                                      */
+    u8 perf_metrics;       /**< bit 15                                      */
+    u8 pebs_output_pt;     /**< bit 16: PEBS puede salir por Intel PT       */
+
     u8 verdict;              /**< `pebs_verdict`                           */
 
     /**

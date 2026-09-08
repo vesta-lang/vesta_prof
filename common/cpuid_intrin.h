@@ -9,7 +9,8 @@
 
 /**
  * @file cpuid_intrin.h
- * @brief CPUID, por el intrinseco de cada familia de compilador.
+ * @brief CPUID por el intrinseco de cada compilador, y los pocos bits que el
+ *        manual de Intel NO puede dar.
  *
  * Es lo primero que hace falta de `common/`: antes de programar un contador hay
  * que saber que PMU hay, y eso lo dice CPUID.
@@ -21,11 +22,14 @@
  * compilador, y el error que sale es `implicit declaration of __cpuid_count`,
  * que no apunta ni de lejos a la causa.  Costo una compilacion averiguarlo.
  *
- * POR QUE INTRINSECO Y NO ASM.  La regla esta en `common/README.md` y aqui se
- * cumple sin excepciones: para una operacion de una instruccion, el asm en
- * linea es una barrera de optimizacion y suele salir PEOR codigo -- el
- * compilador tiene que sanear resultados cuya forma no conoce --, y un `.S`
+ * POR QUE INTRINSECO Y NO ASM.  Para una operacion de una instruccion, el asm
+ * en linea es una barrera de optimizacion y suele salir PEOR codigo, y un `.S`
  * aparte convierte una instruccion en una llamada con volcado de registros.
+ *
+ * DE DONDE SALEN LAS POSICIONES DE BIT.  De `cpuid_index.h`, que se GENERA del
+ * manual.  Un numero de bit escrito de memoria falla callado: se pregunta por el
+ * equivocado, sale cero, y se concluye que la maquina no tiene algo que si
+ * tiene.  No da un error -- da una capacidad perdida.
  *
  * OJO CON EL HIPERVISOR.  CPUID no es una lectura del silicio: bajo un
  * hipervisor cada `cpuid` sale por una salida de VM y las respuestas las pone
@@ -37,6 +41,10 @@
 #define VXP_COMMON_CPUID_INTRIN_H
 
 #include "vxp_base.h"
+
+/* Las posiciones de bit, todas, generadas del manual.  Ver
+ * `tools/gen_cpuid_index.py`. */
+#include "cpuid_index.h"
 
 #if defined(_MSC_VER) && !defined(__clang__)
 #include <intrin.h>
@@ -71,7 +79,7 @@ typedef struct cpuid_regs {
  *
  * Es `inline` en la cabecera y no una funcion en un `.c` a proposito: se llama
  * desde bucles de deteccion y una llamada real aqui costaria mas que la propia
- * instruccion.  Ver la nota sobre LTO en `README.md`.
+ * instruccion.
  */
 static inline void cpuid_query(u32 leaf, u32 subleaf, cpuid_regs *out) {
 #if defined(_MSC_VER) && !defined(__clang__)
@@ -111,8 +119,10 @@ static inline u32 cpuid_max_extended_leaf(void) {
     return r.eax;
 }
 
-/* Hojas que usa la deteccion, con nombre para que no queden numeros sueltos. */
+/* Las hojas que usa la deteccion, con nombre para que no queden numeros
+ * sueltos en las llamadas. */
 #define CPUID_LEAF_FEATURES 0x00000001u      /**< familia/modelo + DS, PDCM   */
+#define CPUID_LEAF_THERMAL_POWER 0x00000006u /**< la puerta de APERF/MPERF    */
 #define CPUID_LEAF_EXT_FEATURES 0x00000007u  /**< hibrido                     */
 #define CPUID_LEAF_PMU 0x0000000Au           /**< PMU arquitectonico          */
 #define CPUID_LEAF_TSC_FREQ 0x00000015u      /**< TSC / cristal               */
@@ -121,13 +131,39 @@ static inline u32 cpuid_max_extended_leaf(void) {
 #define CPUID_LEAF_EXT_POWER 0x80000007u     /**< TSC invariante              */
 #define CPUID_LEAF_EXT_FEATURES_AMD 0x80000001u /**< IBS en AMD               */
 
-/* Bits sueltos, con el registro en el nombre para no equivocar de sitio. */
-#define CPUID_1_EDX_DS 21     /**< Debug Store: sin el no hay PEBS            */
-#define CPUID_1_ECX_PDCM 15   /**< IA32_PERF_CAPABILITIES es legible          */
-#define CPUID_1_ECX_HYPERVISOR 31 /**< hay un hipervisor debajo               */
-#define CPUID_7_EDX_HYBRID 15 /**< la pieza mezcla nucleos P y E              */
-#define CPUID_80000007_EDX_INVARIANT_TSC 8 /**< el TSC no cambia de ritmo     */
-#define CPUID_80000001_ECX_IBS 10 /**< AMD: Instruction Based Sampling        */
+/* -------------------------------------------------------------------------
+ *  Los DOS bits que el manual de Intel no puede dar.
+ *
+ *  Todo lo demas sale de `cpuid_index.h`, generado.  Estos dos siguen escritos
+ *  a mano, y merece la pena decir por que -- que la migracion a la tabla
+ *  generada es justo lo que lo puso a la vista:
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Hay un hipervisor debajo (hoja 1, ECX bit 31).
+ *
+ * **Intel documenta ese bit como "no usado, siempre devuelve 0".**  Que un
+ * hipervisor lo ponga a uno es una convencion de la industria, respetada por
+ * todos, pero no es documentacion de Intel -- y por eso no puede salir de la
+ * tabla generada.
+ *
+ * Se usa igualmente, porque lo que dice importa: bajo un hipervisor CPUID deja
+ * de ser una lectura del silicio.  Pero se sabe de donde viene.
+ */
+#define CPUID_1_ECX_HYPERVISOR 31
+
+/**
+ * AMD: Instruction Based Sampling (hoja 80000001H, ECX bit 10).
+ *
+ * **Intel marca ese rango entero como reservado** en su manual, porque describe
+ * el uso que Intel hace de esa hoja.  El bit es de AMD y su fuente es la
+ * documentacion de AMD, que aqui no esta.
+ *
+ * Queda escrito a mano y senalado: el dia que haga falta de verdad -- IBS no es
+ * opcional a medio plazo -- hay que contrastarlo contra el manual de AMD, no
+ * contra este.
+ */
+#define CPUID_80000001_ECX_IBS 10
 
 /** @brief ¿Esta puesto el bit `n` de `value`? */
 static inline int cpuid_bit(u32 value, u32 n) {

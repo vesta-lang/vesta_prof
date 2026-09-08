@@ -67,25 +67,25 @@ status msr_read(u32 index, u64 *out) {
         return ERR_FAULT;
     }
     switch (index) {
-    case MSR_IA32_MISC_ENABLE:
+    case IA32_MISC_ENABLE:
         *out = g_fake.misc_enable;
         return OK;
-    case MSR_IA32_PERF_CAPABILITIES:
+    case IA32_PERF_CAPABILITIES:
         *out = g_fake.perf_capabilities;
         return OK;
-    case MSR_IA32_DEBUGCTL:
+    case IA32_DEBUGCTL:
         *out = g_fake.debugctl;
         return OK;
-    case MSR_IA32_FIXED_CTR_CTRL:
+    case IA32_FIXED_CTR_CTRL:
         *out = g_fake.fixed_ctr_ctrl;
         return OK;
-    case MSR_IA32_PERF_GLOBAL_CTRL:
+    case IA32_PERF_GLOBAL_CTRL:
         *out = g_fake.perf_global_ctrl;
         return OK;
     default:
-        if (index >= MSR_IA32_PERFEVTSEL0 &&
-            index < MSR_IA32_PERFEVTSEL0 + 8u) {
-            *out = g_fake.evtsel[index - MSR_IA32_PERFEVTSEL0];
+        if (index >= IA32_PERFEVTSEL0 &&
+            index < IA32_PERFEVTSEL0 + 8u) {
+            *out = g_fake.evtsel[index - IA32_PERFEVTSEL0];
             return OK;
         }
         /* Un MSR que el falso no conoce se comporta como uno inexistente: se
@@ -175,13 +175,46 @@ int main(void) {
         }
     }
 
-    printf("--- derived fields ---\n");
+    /* LA OTRA REGRESION.  La primera version leia el formato de registro PEBS
+     * como `value & 0xF`, que son los bits bajos del formato de LBR.  En la
+     * maquina de desarrollo los dos valen cero, asi que el error era invisible:
+     * publicaba un numero correcto por casualidad.
+     *
+     * Por eso el valor de prueba pone campos DISTINTOS en los dos sitios --
+     * LBR 0x2D, PEBS 3 --: asi la extraccion equivocada no puede acertar.  La
+     * de antes daria 0xD, que no es ninguno de los dos. */
+    printf("--- IA32_PERF_CAPABILITIES: every field, not just one bit ---\n");
     {
         fake_reset();
-        g_fake.perf_capabilities = 0x4u; /* formato de registro PEBS = 4 */
+        g_fake.perf_capabilities = 0x173EDull;
         CHECK(pmu_caps_detect(0, &caps) == OK);
         if (caps.vendor == (u32)CPU_VENDOR_INTEL && caps.has_pdcm) {
-            CHECK(caps.pebs_record_format == 4);
+            CHECK(caps.lbr_format == 0x2D);         /* bits  5:0 */
+            CHECK(caps.pebs_trap == 1);             /* bit     6 */
+            CHECK(caps.pebs_arch_regs == 1);        /* bit     7 */
+            CHECK(caps.pebs_record_format == 3);    /* bits 11:8 */
+            CHECK(caps.smm_freeze == 1);            /* bit    12 */
+            CHECK(caps.full_width_write == 1);      /* bit    13 */
+            CHECK(caps.pebs_baseline == 1);         /* bit    14 */
+            CHECK(caps.perf_metrics == 0);          /* bit    15 */
+            CHECK(caps.pebs_output_pt == 1);        /* bit    16 */
+        }
+    }
+
+    /* `IA32_MISC_ENABLE` con el valor REAL medido en la maquina de desarrollo,
+     * para que lo que se afirma del informe se pueda contrastar con el. */
+    printf("--- IA32_MISC_ENABLE: decoded, with a value measured for real ---\n");
+    {
+        fake_reset();
+        g_fake.misc_enable = 0x851889ull;
+        CHECK(pmu_caps_detect(0, &caps) == OK);
+        if (caps.vendor == (u32)CPU_VENDOR_INTEL) {
+            CHECK(caps.perfmon_available == 1);    /* bit  7 */
+            CHECK(caps.bts_unavailable == 1);      /* bit 11 */
+            CHECK(caps.pebs_unavailable_bit == 1); /* bit 12 */
+            /* Y la conclusion: BTS y PEBS caen LOS DOS, que es lo coherente --
+             * cuelgan del mismo Debug Store. */
+            CHECK(caps.verdict == (u8)PMU_PEBS_UNAVAILABLE);
         }
     }
 

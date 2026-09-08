@@ -218,6 +218,24 @@ if (VXP_BUILD_TESTS)
     endif ()
     add_test(NAME pmu_caps COMMAND test_pmu_caps)
 
+    # La tabla de direcciones de MSR, que se GENERA del manual de Intel.
+    #
+    # Generarla quita los errores de tecleo y mete otro riesgo, peor porque es
+    # silencioso: una regeneracion puede mover una direccion sin que nadie mire,
+    # y eso no da un error -- da un perfilador que programa OTRO registro.  Las
+    # que el codigo usa se fijan con su numero y se comprueban al compilar.
+    add_executable(test_msr_index tests/test_msr_index.c)
+    target_link_libraries(test_msr_index PRIVATE vxp_base)
+    target_include_directories(test_msr_index PRIVATE common)
+    set_target_properties(test_msr_index PROPERTIES
+            C_STANDARD 11 C_STANDARD_REQUIRED ON)
+    if (MSVC)
+        target_compile_options(test_msr_index PRIVATE /W4)
+    else ()
+        target_compile_options(test_msr_index PRIVATE -Wall -Wextra -pedantic-errors)
+    endif ()
+    add_test(NAME msr_index COMMAND test_msr_index)
+
     if (WIN32)
         # La disposicion de las estructuras del kernel que declaramos nosotros.
         # Se compila como C, que es como se va a usar `nt.h`.
