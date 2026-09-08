@@ -18,6 +18,7 @@
 
 #include "cpuid_intrin.h"
 #include "msr.h"
+#include "writer.h"
 
 /* -------------------------------------------------------------------------
  *  Utilidades locales.
@@ -34,72 +35,6 @@ static void zero_bytes(void *p, usize n) {
     usize i;
     for (i = 0; i < n; ++i) {
         b[i] = 0;
-    }
-}
-
-/**
- * @brief Cursor de escritura sobre el bufer del llamante.
- *
- * Lleva su propio desbordamiento en vez de truncar en silencio: un informe
- * cortado por la mitad que no lo diga es peor que uno que falta.
- */
-typedef struct writer {
-    char *buf;
-    usize cap;
-    usize len;
-    int overflow;
-} writer;
-
-/** @brief Anade un caracter. */
-static void put_ch(writer *w, char c) {
-    if (w->len + 1 > w->cap) {
-        w->overflow = 1;
-        return;
-    }
-    w->buf[w->len] = c;
-    w->len += 1;
-}
-
-/** @brief Anade una cadena terminada en nul. */
-static void put_str(writer *w, const char *s) {
-    usize i = 0;
-    while (s[i] != 0) {
-        put_ch(w, s[i]);
-        i += 1;
-    }
-}
-
-/** @brief Anade un entero sin signo en decimal. */
-static void put_u64(writer *w, u64 v) {
-    char tmp[20];
-    int n = 0;
-    if (v == 0) {
-        put_ch(w, '0');
-        return;
-    }
-    while (v > 0 && n < 20) {
-        tmp[n] = (char)('0' + (int)(v % 10));
-        v /= 10;
-        n += 1;
-    }
-    while (n > 0) {
-        n -= 1;
-        put_ch(w, tmp[n]);
-    }
-}
-
-/**
- * @brief Anade un entero en hexadecimal con `digits` cifras y prefijo `0x`.
- *
- * Ancho fijo a proposito: los valores de MSR se comparan a ojo entre nucleos, y
- * con ancho variable las columnas se descolocan y el ojo deja de servir.
- */
-static void put_hex(writer *w, u64 v, int digits) {
-    static const char d[] = "0123456789ABCDEF";
-    int i;
-    put_str(w, "0x");
-    for (i = digits - 1; i >= 0; --i) {
-        put_ch(w, d[(v >> (i * 4)) & 0xFu]);
     }
 }
 
@@ -126,17 +61,15 @@ static void put_msr(writer *w, const msr_value *m, int digits) {
 
 /** @brief Fabricante, de la hoja 0.  Decide que MSR tienen sentido. */
 static u32 detect_vendor(void) {
-    cpuid_regs r;
-    cpuid_query(0, 0, &r);
-    /* "GenuineIntel" repartido en EBX, EDX, ECX -- en ese orden, que no es el
-     * que sugiere el nombre de los registros. */
-    if (r.ebx == 0x756E6547u && r.edx == 0x49656E69u && r.ecx == 0x6C65746Eu) {
-        return (u32)CPU_VENDOR_INTEL;
-    }
-    if (r.ebx == 0x68747541u && r.edx == 0x69746E65u && r.ecx == 0x444D4163u) {
-        return (u32)CPU_VENDOR_AMD;
-    }
-    return (u32)CPU_VENDOR_UNKNOWN;
+    /* La deteccion vive en `cpuid_intrin.h`: es CPUID puro y la necesita
+     * tambien el volcado.  `cpu_vendor` y `CPUID_VENDOR_*` valen lo mismo a
+     * proposito, y las dos comprobaciones de abajo lo sostienen -- si alguien
+     * renumera uno de los dos, no compila en vez de devolver otro fabricante. */
+    STATIC_ASSERT(CPUID_VENDOR_INTEL == (u32)CPU_VENDOR_INTEL,
+                  "CPUID_VENDOR_INTEL and CPU_VENDOR_INTEL disagree");
+    STATIC_ASSERT(CPUID_VENDOR_AMD == (u32)CPU_VENDOR_AMD,
+                  "CPUID_VENDOR_AMD and CPU_VENDOR_AMD disagree");
+    return cpuid_vendor();
 }
 
 /**
@@ -511,10 +444,7 @@ status pmu_caps_format(const pmu_caps *caps, char *buf, usize cap,
     if (caps == 0 || buf == 0 || written == 0) {
         return ERR_INVALID;
     }
-    w.buf = buf;
-    w.cap = cap;
-    w.len = 0;
-    w.overflow = 0;
+    writer_init(&w, buf, cap);
 
     put_str(&w, "cpu ");
     put_u64(&w, caps->cpu_index);

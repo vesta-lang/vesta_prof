@@ -170,6 +170,33 @@ static inline int cpuid_bit(u32 value, u32 n) {
     return (int)((value >> n) & 1u);
 }
 
+/* Quien fabrico la pieza, en la codificacion de `cpu_vendor`.  Los valores se
+ * repiten aqui en vez de incluir `pmu_caps.h` porque la dependencia iria al
+ * reves: las capacidades del PMU se apoyan en CPUID, no al contrario. */
+#define CPUID_VENDOR_UNKNOWN 0u
+#define CPUID_VENDOR_INTEL 1u
+#define CPUID_VENDOR_AMD 2u
+
+/**
+ * @brief Quien fabrico la pieza.
+ *
+ * Hace falta antes que nada: la misma hoja quiere decir cosas distintas segun
+ * el fabricante, y las tablas de los manuales van separadas por eso mismo.
+ */
+static inline u32 cpuid_vendor(void) {
+    cpuid_regs r;
+    cpuid_query(0, 0, &r);
+    /* "GenuineIntel" repartido en EBX, EDX, ECX -- en ese orden, que no es el
+     * que sugiere el nombre de los registros. */
+    if (r.ebx == 0x756E6547u && r.edx == 0x49656E69u && r.ecx == 0x6C65746Eu) {
+        return CPUID_VENDOR_INTEL;
+    }
+    if (r.ebx == 0x68747541u && r.edx == 0x69746E65u && r.ecx == 0x444D4163u) {
+        return CPUID_VENDOR_AMD;
+    }
+    return CPUID_VENDOR_UNKNOWN;
+}
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
