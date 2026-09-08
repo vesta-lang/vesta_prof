@@ -10,6 +10,25 @@ Lo **publico**, y solo dos cosas:
 Las dos cruzan una frontera de verdad. Lo que no la cruce va al lado de su
 fuente.
 
+## Y por eso este directorio es MIT
+
+Es la unica parte del proyecto que no lleva la GPLv2. La frontera de la licencia
+es exactamente esta: **`include/` es MIT, todo lo demas es GPLv2** -- ver
+`NOTICE` en la raiz.
+
+El motivo sale de lo que se acaba de decir. Toda la seccion siguiente trata de
+que el contrato se describa a si mismo para que **herramientas de terceros**
+puedan leer lo que el perfilador produce. Bajo copyleft sin excepcion, cualquiera
+que incluyera `vxp_abi.h` para escribir un analizador tendria que licenciar su
+herramienta como GPL: se habria construido un formato abierto que legalmente
+nadie puede consumir sin cambiar la licencia de su producto, y el trabajo de
+hacerlo autodescriptivo no serviria de nada.
+
+Tiene una consecuencia practica al decidir donde va una cabecera, y conviene
+tenerla presente: **poner algo aqui es publicarlo bajo MIT**. Si una cabecera no
+cruza la frontera kernel-usuario ni forma parte de la API de la biblioteca, va
+al lado de su fuente -- no por orden, sino porque aqui se regala.
+
 ## Lo que exige el contrato compartido
 
 Tiene que compilar en **tres** entornos: kernel de Windows, kernel de Linux y

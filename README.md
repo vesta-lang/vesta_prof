@@ -380,6 +380,26 @@ nombra -- y nadie nombra `operator new`. Aqui no hay nada que se reclame de
 forma implicita: todo lo que ofrece se llama por su nombre, asi que un `.a`
 normal se comporta como se espera.
 
+### Y por eso lleva dos licencias
+
+Del mismo modo que `vesta_alloc` no lleva la GPLv2 de VestaVM, aqui la frontera
+de la licencia es un directorio:
+
+| | |
+| --- | --- |
+| `include/` | **MIT** (`LICENSE.MIT`) |
+| todo lo demas | **GPLv2** (`LICENSE`) |
+
+`include/` es el contrato publico, y se diseño para que herramientas de terceros
+puedan leer las muestras. Bajo copyleft sin excepcion, quien incluyera
+`vxp_abi.h` para escribir un analizador tendria que licenciar su herramienta como
+GPL: un formato abierto que legalmente nadie puede consumir. El resto es GPLv2, y
+para el `.ko` ademas no hay eleccion -- el subsistema de contadores de
+rendimiento del nucleo esta marcado como solo-GPL, y sin `MODULE_LICENSE("GPL")`
+el modulo no resuelve esos simbolos.
+
+El razonamiento entero, y lo que NO se hereda de VestaVM, en `NOTICE`.
+
 ## La restriccion que sostiene el modo suelto
 
 El perfilador se entrega de dos maneras: **dentro del compilador**, que es la

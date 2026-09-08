@@ -2,7 +2,9 @@
  * VestaVM - Maquina Virtual Distribuida
  *
  * Copyright (C) 2026 David Lopez.T (DesmonHak) (Castilla y Leon, ES)
- * Licencia: GPLv2 + excepcion de runtime (ver LICENSE).
+ * Licencia: MIT (ver LICENSE.MIT).  Esta en `include/`, que es el contrato
+ * publico: una herramienta de terceros puede incluirlo sin que la GPLv2 del
+ * resto del proyecto le alcance.
  */
 
 /**

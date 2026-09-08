@@ -1,0 +1,94 @@
+Aviso de licencia de vesta_prof
+===============================
+
+Copyright (c) 2026 David Lopez T. (DesmonHak)
+
+Este proyecto lleva DOS licencias, y la frontera es un directorio:
+
+    include/          MIT           ver LICENSE.MIT
+    todo lo demas     GPLv2         ver LICENSE
+
+No es un reparto arbitrario: `include/` es lo publico -- el contrato compartido
+entre el kernel y el espacio de usuario, y la API de la biblioteca de usuario --
+y esta escrito en include/README.md desde antes de que hubiera licencia.
+
+
+Por que `include/` es MIT
+-------------------------
+
+Porque si no, el formato de las muestras seria cerrado en la practica.
+
+Se diseño una ABI que se describe a si misma para que herramientas de terceros
+puedan leer lo que este perfilador produce -- cabeceras `{tipo, longitud}` en
+cada registro, estructuras que declaran su tamano, y descriptores de disposicion
+que se pueden consultar en ejecucion.  Todo eso vive en `include/vxp_abi.h`.
+
+Bajo copyleft sin excepcion, cualquiera que incluyera esa cabecera para escribir
+un analizador tendria que licenciar SU herramienta como GPL.  Es decir: se
+habria construido un formato abierto que legalmente nadie puede consumir sin
+cambiar la licencia de su producto.  El trabajo de hacerlo autodescriptivo no
+serviria de nada.
+
+Es el mismo razonamiento por el que `vesta_alloc` lleva MIT y no la GPLv2 de
+VestaVM: una pieza pensada para que otros la enlacen no puede arrastrar a su
+licencia a quien la enlaza.
+
+En esta direccion no hay friccion -- codigo MIT entra en un proyecto GPLv2 sin
+problema --, asi que el resto del perfilador usa `include/` con normalidad.
+
+
+Por que el resto es GPLv2
+-------------------------
+
+Por dos motivos, y el segundo no admite alternativa.
+
+El practico: el perfilador viaja dentro de VestaVM y tambien suelto, y el codigo
+tiene que poder moverse entre los dos proyectos sin un tramite legal.
+
+El tecnico: el nucleo de Linux marca como "solo GPL" (EXPORT_SYMBOL_GPL) buena
+parte de lo que este perfilador necesita, y el subsistema de contadores de
+rendimiento esta ahi dentro.  Un modulo que no declare `MODULE_LICENSE("GPL")`
+no resuelve esos simbolos: no es que la GPLv2 sea preferible, es que sin ella el
+modulo no carga.
+
+
+Dependencias de terceros
+------------------------
+
+Ninguna.
+
+No es una lista sin rellenar: es una restriccion de diseño, y esta en README.md.
+Lo que hace falta del kernel de Windows vive en `windows/nt.h`, declarado aqui,
+precisamente para que nadie tenga que instalar el WDK.  El lado de Linux se
+compila contra las cabeceras del kernel al que se va a cargar, que son del
+sistema de quien construye y no se distribuyen con esto.  Y el cimiento de
+`include/` no incluye ni la biblioteca estandar de C, porque tiene que valer
+igual en los dos kernels y en espacio de usuario.
+
+Si algun dia entra un componente de terceros, se anota aqui con su licencia, que
+prevalecera sobre este fichero para el codigo respectivo.
+
+
+Lo que NO se hereda de VestaVM
+------------------------------
+
+VestaVM añade a su GPLv2 dos excepciones que aqui no aplican, y se dicen para
+que nadie las de por heredadas:
+
+  - La excepcion de salida del compilador (Runtime Exception) libera el codigo
+    que VestaVM PRODUCE -- bytecode, IR, codigo nativo AOT.  Este proyecto no
+    produce nada de eso.
+
+  - La excepcion de enlace con OpenSSL cubre una biblioteca que aqui no se
+    enlaza.  Si algun dia se enlaza, se añade entonces.
+
+Una excepcion es un permiso, y concederlo sobre algo que no existe solo sirve
+para confundir a quien lea el fichero buscando saber que puede hacer.
+
+
+Nota
+----
+
+Los textos de LICENSE y LICENSE.MIT son la GPLv2 y la MIT sin modificar.  Lo
+propio es este fichero.  Si vas a apoyarte legalmente en su redaccion, conviene
+una revision juridica.
