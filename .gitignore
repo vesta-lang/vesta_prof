@@ -1,6 +1,8 @@
 # Directorios de construccion
 build/
+build*/
 cmake-build-*/
+cmake-*
 out/
 
 # Artefactos
@@ -14,6 +16,22 @@ out/
 *.dylib
 *.exe
 *.pdb
+*.elf
+*.gch
+*.map
+# Restos del enlazador de Microsoft: biblioteca de exportacion, enlace
+# incremental y su base de datos.  Salen al construir con MSVC y no los produce
+# ningun paso que queramos versionar.
+*.exp
+*.ilk
+*.idb
+# El recurso ya compilado.  El `.rc` del que sale SI se versiona.
+*.res
+
+# Los programas que se compilen para tener algo que perfilar: son salida del
+# compilador de Vesta, no fuente de este proyecto.  El `.vx` del que salen si.
+*.velb
+*.velb-map
 
 # CMake
 CMakeCache.txt
@@ -48,6 +66,26 @@ compile_commands.json
 *.pfx
 *.inf.bak
 
+# El mismo material en las formas que usa el lado de Linux, y la contrasena que
+# `make_dev_cert.py` deja al lado del `.pfx`.
+#
+# Va por EXTENSION ademas de por directorio, que es el complemento del
+# razonamiento de `.devcert/` de un poco mas abajo: alli se cubre lo que caiga
+# dentro con un nombre que no previmos, y aqui lo que se escriba FUERA.  Una
+# clave privada que alguien copie a otro sitio para probar algo sigue siendo una
+# clave publicada, y ese es el error que de verdad pasa.
+#
+# `*.inf` NO esta en la lista a proposito: el fichero de instalacion del driver
+# es fuente y tiene que viajar.
+*.pem
+*.der
+*.key
+*.p12
+*.crt
+*.pass
+*.pvk
+*.spc
+
 # Todo el material de firma que genera `tools/make_dev_cert.py`, por directorio
 # y no solo por extension: una clave privada suelta ahi dentro con un nombre que
 # no previmos seguiria siendo una clave publicada.
@@ -79,9 +117,70 @@ env/
 .ruff_cache/
 *.egg-info/
 
-# Editores
+# Editores y sus caches
 .vscode/
 .idea/
+.xmake
+.cache/
+.clangd
+.ccls-cache/
+
+# Basura que dejan los exploradores de ficheros de cada sistema.  No la crea
+# nadie a proposito, y por eso se cuela.
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporales, con los nombres que se usan cuando uno tiene prisa
+tem
+temp
+tmp/
+*.bak
+*.orig
+*.rej
+*~
+
+# Historiales de ordenes de una sesion de depuracion
+*history.txt
+
+# --- Rastro de asistentes de IA -------------------------------------------
+#
+# Es una herramienta LOCAL: no deja huella en nada que se publique ni en nada
+# que quede en el historial.  Estos ficheros aparecen solos -- notas de sesion,
+# volcados de contexto, ficheros de instrucciones -- y ninguno describe el
+# programa.
+#
+# Se ignoran por PREFIJO y no por nombre exacto porque cada herramienta escribe
+# el suyo y cambia entre versiones.
+claude*
+CLAUDE*
+chatgpt*
+copilot*
+deepseck*
+.aider*
+.cursor*
+
+# El directorio de contexto, aparte: `claude*` NO lo cubre, porque un patron sin
+# barra ni asterisco inicial se compara con el nombre completo y `.claude`
+# empieza por punto.  Comprobado con `git check-ignore`, que decia que no estaba
+# ignorado.
+.claude/
+
+# --- Ingenieria inversa ----------------------------------------------------
+#
+# Un driver se depura mirando binarios que no son nuestros -- el propio nucleo,
+# otros modulos --, y las bases de datos que dejan esas herramientas pesan
+# mucho, no se reproducen y contienen trozos del binario analizado.  Ese ultimo
+# punto es el que importa: no es codigo nuestro y no tiene por que acabar en un
+# repositorio publico.
+*.id0
+*.id1
+*.id2
+*.nam
+*.til
+*.i64
+*.gpr
+*.rep
 
 # La referencia generada con Doxygen: se genera, no se versiona.
 doc/out/
