@@ -82,10 +82,6 @@ significa otra cosa**: el driver AOT, la parte que orquesta la construccion --
 "el driver obtiene un `NativeBackend`", "el driver los serializa en la seccion
 `.vxgc_smap`". No tiene nada que ver con un driver del sistema operativo.
 
-No es una precaucion teorica: la confusion ya ocurrio en una conversacion de
-diseno, y hubo que parar a aclarar de cual de los dos se estaba hablando. Un
-directorio llamado `driver/` la habria vuelto permanente.
-
 ## Es un proyecto aparte que el compilador reutiliza
 
 El mismo trato que `vesta_alloc`, y por los mismos motivos:
