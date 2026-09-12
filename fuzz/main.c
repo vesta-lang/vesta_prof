@@ -149,6 +149,18 @@ typedef struct run_state {
     isa_tally total;
     u64 lethal;  /**< \~english named candidates that killed a worker \~spanish candidatas nombradas que mataron a un trabajador \~ */
     u64 hangers; /**< \~english named candidates that never came back \~spanish candidatas nombradas que no volvieron nunca \~ */
+    /**
+     * \~english The lengths of the ones that killed, kept apart from the sweep's own
+     * histogram.  They are measured differently -- from what the worker said before it
+     * died, not from a tally it wrote -- and mixing two provenances in one column is
+     * how a number stops meaning anything.
+     *
+     * \~spanish Las longitudes de las que mataron, aparte del histograma del propio
+     * barrido.  Se miden de otra forma -- de lo que dijo el trabajador antes de morir, no
+     * de una cuenta que escribiera -- y mezclar dos procedencias en una columna es como
+     * un numero deja de significar nada.
+     */
+    u64 by_length[ISA_MAX_LEN + 1u];
 } run_state;
 
 /** @brief
@@ -191,7 +203,8 @@ static void put_item(const isa_work *w) {
  * Lo que se lleva una linea es una muerte que NOMBRA una candidata, porque eso es el
  * hallazgo, y un subarbol que volvio con un barrido dentro, porque eso es el dato.
  */
-static void on_item(void *ctx, const isa_work *w, u32 how, const isa_tally *t) {
+static void on_item(void *ctx, const isa_work *w, u32 how, const isa_tally *t,
+                    u32 reached) {
     run_state *st = (run_state *)ctx;
 
     if (how == (u32)ISA_WORKER_DONE) {
@@ -217,6 +230,25 @@ static void on_item(void *ctx, const isa_work *w, u32 how, const isa_tally *t) {
         printf("  CUELGA    ");
     }
     put_item(w);
+    /*
+     * \~english THE LENGTH COMES FROM WHAT THE WORKER SAID, not from a tally it never
+     * got to write.  A candidate that takes the process down cannot report anything
+     * afterwards, so the count it had reached is the last thing it announced -- and
+     * since the sliding loop stops at the first count the decoder accepts, that count
+     * IS the length.
+     *
+     * \~spanish LA LONGITUD SALE DE LO QUE DIJO EL TRABAJADOR, no de una cuenta que no
+     * llego a escribir.  Una candidata que se lleva el proceso no puede informar de
+     * nada despues, asi que el numero al que habia llegado es lo ultimo que anuncio --
+     * y como el bucle deslizante para en el primer numero que el decodificador acepta,
+     * ese numero ES la longitud.
+     */
+    if (reached != 0) {
+        printf("   mide %u", (unsigned)reached);
+        if (reached <= ISA_MAX_LEN) {
+            st->by_length[reached] += 1u;
+        }
+    }
     printf("\n");
 }
 
@@ -255,6 +287,10 @@ static int parent_main(const char *exe, u32 depth, u32 workers, u32 timeout_ms) 
     printf("  murieron        %llu\n", (unsigned long long)ps.died);
     printf("  se colgaron     %llu\n", (unsigned long long)ps.hung);
     printf("  candidatas nombradas  %llu\n", (unsigned long long)ps.named);
+    /* El canje de las sondas, con los dos numeros: lo que costaron y lo que
+     * evitaron.  Uno solo de los dos no dice si se pagan. */
+    printf("  sondas de longitud    %llu, que respondieron por %llu candidatas\n",
+           (unsigned long long)ps.probes, (unsigned long long)ps.covered);
     if (ps.unspawnable != 0) {
         printf("  SIN PROCESO     %llu  (trozos que nadie barrio)\n",
                (unsigned long long)ps.unspawnable);
@@ -289,6 +325,23 @@ static int parent_main(const char *exe, u32 depth, u32 workers, u32 timeout_ms) 
            (unsigned long long)st.total.skipped);
     printf("  %llu candidatas matan al trabajador, %llu lo cuelgan\n",
            (unsigned long long)st.lethal, (unsigned long long)st.hangers);
+    {
+        int any = 0;
+        for (i = 1; i <= ISA_MAX_LEN; ++i) {
+            if (st.by_length[i] != 0) {
+                if (!any) {
+                    printf("  y de las que matan, la longitud que alcanzaron a "
+                           "decir:\n");
+                    any = 1;
+                }
+                printf("    %2u bytes %12llu\n", i,
+                       (unsigned long long)st.by_length[i]);
+            }
+        }
+        if (!any && st.lethal != 0) {
+            printf("  ninguna de las que matan dijo su longitud\n");
+        }
+    }
 
     /*
      * \~english THE ACCOUNTING, and it is the only statement here that can catch a
@@ -314,7 +367,8 @@ static int parent_main(const char *exe, u32 depth, u32 workers, u32 timeout_ms) 
      */
     {
         u64 space = 1;
-        u64 seen = st.total.candidates + st.total.skipped + ps.named;
+        u64 seen =
+                st.total.candidates + st.total.skipped + ps.named + ps.covered;
         int fits = 1;
 
         for (i = 0; i < depth; ++i) {
@@ -329,8 +383,8 @@ static int parent_main(const char *exe, u32 depth, u32 workers, u32 timeout_ms) 
                    "contabilidad\n",
                    depth);
         } else if (seen == space) {
-            printf("  probadas + saltadas + nombradas = %llu, que es 256^%u "
-                   "exacto\n",
+            printf("  probadas + saltadas + nombradas + representadas = %llu, "
+                   "que es 256^%u exacto\n",
                    (unsigned long long)seen, depth);
         } else {
             printf("  CUADRA MAL: %llu contabilizadas de %llu.  El barrido tiene "

@@ -103,6 +103,34 @@ typedef struct isa_pool_stats {
     u64 hung;       /**< \~english items whose worker ran out of time \~spanish trozos cuyo trabajador agoto el plazo \~ */
     u64 named;      /**< \~english single candidates pinned down as the culprit \~spanish candidatas sueltas fijadas como culpables \~ */
     u64 unspawnable; /**< \~english items no process could be started for \~spanish trozos para los que no se pudo arrancar proceso \~ */
+    u64 probes;     /**< \~english extra processes spent asking how long an instruction is \~spanish procesos de mas gastados preguntando cuanto mide una instruccion \~ */
+    /**
+     * \~english Candidates a named instruction stands for, beyond the one named.
+     *
+     * WITHOUT THIS THE ACCOUNTING BREAKS, and it broke: when a probe establishes that a
+     * whole subtree is one instruction, one candidate gets named and the other
+     * `256^k - 1` are answered by it -- but nobody was counting them, so the sweep came
+     * out 2550 candidates short of the space and said so.  That is the accounting doing
+     * its job; the number it was missing is this one.
+     *
+     * It is NOT "spawns avoided", which is a different quantity and not worth inventing
+     * a formula for: what the probes cost and save in processes is `probes` against the
+     * measured spawn count of a run.
+     *
+     * \~spanish Candidatas que representa una instruccion nombrada, aparte de la
+     * nombrada.
+     *
+     * SIN ESTO LA CONTABILIDAD SE ROMPE, y se rompio: cuando una sonda establece que un
+     * subarbol entero es una instruccion, se nombra una candidata y las otras
+     * `256^k - 1` quedan respondidas por ella -- pero nadie las contaba, asi que el
+     * barrido salia 2550 candidatas por debajo del espacio y lo dijo.  Eso es la
+     * contabilidad haciendo su trabajo; el numero que le faltaba es este.
+     *
+     * NO es "arranques evitados", que es otra cantidad y no merece inventarle una
+     * formula: lo que cuestan y ahorran las sondas en procesos es `probes` frente a la
+     * cuenta de arranques medida de una corrida.
+     */
+    u64 covered;
 } isa_pool_stats;
 
 /**
@@ -113,6 +141,23 @@ typedef struct isa_pool_stats {
  *
  * @param how \~english an `isa_worker_end` \~spanish un `isa_worker_end` \~
  * @param t \~english only meaningful when `how` is `ISA_WORKER_DONE` \~spanish solo significa algo cuando `how` es `ISA_WORKER_DONE` \~
+ * @param reached \~english how many bytes the worker had got to offering when it stopped existing; 0 if it never said \~spanish cuantos bytes llevaba ofreciendo el trabajador cuando dejo de existir; 0 si no lo dijo \~
+ *
+ * \~english
+ * `reached` IS THE LENGTH OF A CANDIDATE THAT KILLS.  A worker given a single
+ * candidate announces, before each attempt, how many bytes it is about to make
+ * available -- so when it dies, the last thing it said is the first count at which
+ * the decoder stopped asking for more, which is exactly the instruction's length.
+ * It is the only way to learn it: the candidate destroys the process, so nothing
+ * inside the process can report it afterwards.
+ *
+ * \~spanish
+ * `reached` ES LA LONGITUD DE UNA CANDIDATA QUE MATA.  Un trabajador al que se le da
+ * una sola candidata anuncia, antes de cada intento, cuantos bytes va a poner
+ * disponibles -- asi que cuando muere, lo ultimo que dijo es el primer numero con el
+ * que el decodificador dejo de pedir mas, que es exactamente la longitud de la
+ * instruccion.  Es la unica forma de saberla: la candidata destruye el proceso, asi
+ * que nada de dentro del proceso puede informarla despues.
  *
  * \~english
  * WHETHER AN ITEM IS A NAMED CULPRIT IS NOT PASSED, because it is already in the
@@ -127,7 +172,7 @@ typedef struct isa_pool_stats {
  * copia de un hecho, y dos copias son un sitio donde discrepar.
  */
 typedef void (*isa_pool_report_fn)(void *ctx, const isa_work *w, u32 how,
-                                   const isa_tally *t);
+                                   const isa_tally *t, u32 reached);
 
 /**
  * @brief
