@@ -133,16 +133,24 @@ endif ()
 # driver necesita que no se le anadan las bibliotecas estandar del enlace y esa
 # variable es de ambito de directorio.  Ver windows/CMakeLists.txt.
 #
-# Con MSVC no se construye, y no por capricho: las banderas de enlace de un
-# driver son otras por completo (`/DRIVER`, `/SUBSYSTEM:NATIVE`,
-# `/ENTRY:DriverEntry`, y la biblioteca de importacion se genera con `lib` en
-# vez de con `dlltool`).  Soportar los dos seria mantener dos recetas de las que
-# solo una se usa a diario.  Se dice, en vez de producir algo que no carga.
+# Hace falta una cadena GNU, y la condicion es el ENLAZADOR y no la marca del
+# compilador.  Las banderas de un driver son otras por completo y aqui estan
+# escritas para `ld` (`-Wl,--subsystem,native`, `--entry`, `--image-base`); con
+# `link` de Microsoft serian `/DRIVER`, `/SUBSYSTEM:NATIVE`, `/ENTRY:DriverEntry`
+# y la biblioteca de importacion saldria de `lib` en vez de `dlltool`.  Sostener
+# las dos recetas cuando solo una se usa a diario no se paga: se DICE, en vez de
+# producir algo que no carga.
+#
+# Por que `MINGW` y no `NOT MSVC`, que es lo que habia: un Clang instalado en
+# Windows apunta por defecto a `x86_64-pc-windows-msvc` y conduce `lld-link`, que
+# rechaza esas cinco banderas.  Ese Clang no es MSVC, asi que entraba por el
+# `else` y rompia `all` -- y con el todo lo que cuelga de `all`.  `MINGW` mira lo
+# que de verdad decide, asi que un Clang de MinGW si vale.
 if (VXP_KERNEL_SIDE AND WIN32)
-    if (MSVC)
-        message(STATUS "profiler: el .sys no se construye con MSVC -- usa GCC o Clang")
-    else ()
+    if (MINGW)
         add_subdirectory(windows)
+    else ()
+        message(STATUS "profiler: el .sys necesita una cadena GNU (ld); ${CMAKE_C_COMPILER_ID} enlaza con ${CMAKE_LINKER} y pide otra receta")
     endif ()
 endif ()
 
@@ -385,6 +393,106 @@ if (VXP_BUILD_TESTS)
                 $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -pedantic-errors>)
     endif ()
 
+    # El barredor, que es lo primero que junta el recorrido con el oraculo.
+    #
+    # Fuera de MSVC por lo mismo que `vxp_calib`: arrastra la region guardada en
+    # ensamblador con sintaxis de GNU.  El BARRIDO en si no tiene nada de eso, y
+    # queda contrastado en los tres compiladores por `test_isa_sweep`, que lo
+    # conduce con un oraculo inventado.
+    if (WIN32 AND NOT MSVC)
+        enable_language(ASM)
+        add_executable(vxp_fuzz
+                fuzz/main.c
+                common/isa/walk.c
+                common/isa/sweep.c
+                common/isa/queue.c
+                windows/isa_win.c
+                windows/isa_pool.c
+                windows/asm/x86_64/isa_trial.S)
+        target_link_libraries(vxp_fuzz PRIVATE vxp_base)
+        target_include_directories(vxp_fuzz PRIVATE common windows)
+        set_target_properties(vxp_fuzz PROPERTIES
+                C_STANDARD 11 C_STANDARD_REQUIRED ON)
+        target_compile_options(vxp_fuzz PRIVATE
+                $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -pedantic-errors>)
+    endif ()
+
+    # El recorrido del espacio de instrucciones.  Se construye en los TRES
+    # compiladores, y no es casualidad: no ejecuta nada, asi que no necesita ni
+    # paginas ni la region guardada en ensamblador de GNU que deja fuera a MSVC.
+    # Es lo que se compra separando lo que DECIDE de lo que ejecuta.
+    add_executable(test_isa_walk tests/test_isa_walk.c common/isa/walk.c)
+    target_link_libraries(test_isa_walk PRIVATE vxp_base)
+    target_include_directories(test_isa_walk PRIVATE common)
+    set_target_properties(test_isa_walk PROPERTIES
+            C_STANDARD 11 C_STANDARD_REQUIRED ON)
+    if (MSVC)
+        target_compile_options(test_isa_walk PRIVATE /W4 /WX)
+    else ()
+        target_compile_options(test_isa_walk PRIVATE
+                -Wall -Wextra -pedantic-errors)
+    endif ()
+    add_test(NAME isa_walk COMMAND test_isa_walk)
+
+    # Y el barrido, con un oraculo inventado.  Tambien en los tres compiladores:
+    # es lo que compra que el oraculo entre como tabla de operaciones en vez de
+    # que el barrido sepa lo que es una pagina.
+    add_executable(test_isa_sweep
+            tests/test_isa_sweep.c common/isa/walk.c common/isa/sweep.c)
+    target_link_libraries(test_isa_sweep PRIVATE vxp_base)
+    target_include_directories(test_isa_sweep PRIVATE common)
+    set_target_properties(test_isa_sweep PROPERTIES
+            C_STANDARD 11 C_STANDARD_REQUIRED ON)
+    if (MSVC)
+        target_compile_options(test_isa_sweep PRIVATE /W4 /WX)
+    else ()
+        target_compile_options(test_isa_sweep PRIVATE
+                -Wall -Wextra -pedantic-errors)
+    endif ()
+    add_test(NAME isa_sweep COMMAND test_isa_sweep)
+
+    # Y la cola con su refinamiento.  Es lo que convierte la muerte de un trabajador
+    # en una candidata con nombre, y se prueba SIN procesos: el descenso se conduce
+    # declarando mortal una cadena elegida.  Por eso vive en `common/` y no dentro
+    # del grupo de trabajadores.
+    add_executable(test_isa_queue
+            tests/test_isa_queue.c common/isa/queue.c)
+    target_link_libraries(test_isa_queue PRIVATE vxp_base)
+    target_include_directories(test_isa_queue PRIVATE common)
+    set_target_properties(test_isa_queue PROPERTIES
+            C_STANDARD 11 C_STANDARD_REQUIRED ON)
+    if (MSVC)
+        target_compile_options(test_isa_queue PRIVATE /W4 /WX)
+    else ()
+        target_compile_options(test_isa_queue PRIVATE
+                -Wall -Wextra -pedantic-errors)
+    endif ()
+    add_test(NAME isa_queue COMMAND test_isa_queue)
+
+    # El oraculo de longitud de la ISA, que es el suelo del fuzzer.
+    #
+    # Se prueba contra instrucciones cuya longitud NO es opinable -- `nop` mide
+    # uno, `mov eax,imm32` cinco --, porque el recorrido usa la longitud medida
+    # para elegir que byte avanzar: una longitud equivocada no da un error, da un
+    # recorrido que se salta regiones sin decirlo.
+    #
+    # Con MSVC no se construye por la misma razon que `vxp_calib`: la region
+    # guardada va en ensamblador con sintaxis de GNU, y MSVC quiere MASM.
+    if (WIN32 AND NOT MSVC)
+        enable_language(ASM)
+        add_executable(test_isa_trial
+                tests/test_isa_trial.c
+                windows/isa_win.c
+                windows/asm/x86_64/isa_trial.S)
+        target_link_libraries(test_isa_trial PRIVATE vxp_base)
+        target_include_directories(test_isa_trial PRIVATE common windows)
+        set_target_properties(test_isa_trial PROPERTIES
+                C_STANDARD 11 C_STANDARD_REQUIRED ON)
+        target_compile_options(test_isa_trial PRIVATE
+                $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -pedantic-errors>)
+        add_test(NAME isa_trial COMMAND test_isa_trial)
+    endif ()
+
     if (WIN32)
         # La disposicion de las estructuras del kernel que declaramos nosotros.
         # Se compila como C, que es como se va a usar `nt.h`.
@@ -413,7 +521,39 @@ if (VXP_BUILD_TESTS)
                 "C:/TDM-GCC-64/x86_64-w64-mingw32/include"
                 "C:/mingw64/x86_64-w64-mingw32/include"
                 NO_DEFAULT_PATH)
+
+        # QUE ESTEN NO ES QUE SIRVAN, y la diferencia solo se sabe compilando.
+        # Buscar el directorio encuentra las cabeceras de OTRO compilador: estan
+        # en el arbol de MinGW, y ahi siguen cuando se construye con Clang o con
+        # MSVC.  Preguntar solo si existen configuraba un objetivo que luego no
+        # compilaba, y eso no es una prueba que se omite -- es `all` roto, y con
+        # el todo lo que cuelga de `all`.
+        #
+        # Paso de verdad: con Clang, `ddk/ntddk.h` llega por `wdm.h` al
+        # `intrin.h` de MinGW, que declara `__m64` como una union de relleno para
+        # poder nombrar los intrinsecos de IA64 y acto seguido incluye
+        # `<mmintrin.h>` -- que con Clang es el de Clang, donde `__m64` es un
+        # vector de verdad.  Veinte errores, todos dentro de esa cabecera ajena.
+        #
+        # LA SONDA NO INCLUYE NADA NUESTRO, y es lo mas importante de aqui.  Si
+        # compilara el test de verdad, un desacuerdo REAL entre nuestra tabla y
+        # la referencia -- que es justo lo que este objetivo existe para pillar --
+        # apagaria la comprobacion en vez de fallar.  La sonda responde una sola
+        # pregunta, "traga este compilador esa cabecera", y ninguna mas.
         if (VXP_DDK_REFERENCE)
+            include(CheckCSourceCompiles)
+            set(CMAKE_REQUIRED_INCLUDES
+                    "${VXP_DDK_REFERENCE}" "${VXP_DDK_REFERENCE}/ddk")
+            check_c_source_compiles(
+                    "#include <ddk/ntddk.h>\nint main(void) { return 0; }\n"
+                    VXP_DDK_REFERENCE_USABLE)
+            unset(CMAKE_REQUIRED_INCLUDES)
+        endif ()
+
+        # Tres estados y no dos, porque "no se comprobo" y "no se pudo comprobar"
+        # se arreglan de forma distinta, y callar el motivo obliga a averiguarlo
+        # otra vez.
+        if (VXP_DDK_REFERENCE AND VXP_DDK_REFERENCE_USABLE)
             add_executable(test_nt_layout_ref tests/test_nt_layout_ref.c)
             target_include_directories(test_nt_layout_ref PRIVATE
                     windows "${VXP_DDK_REFERENCE}" "${VXP_DDK_REFERENCE}/ddk")
@@ -421,6 +561,8 @@ if (VXP_BUILD_TESTS)
                     C_STANDARD 11 C_STANDARD_REQUIRED ON)
             add_test(NAME nt_layout_ref COMMAND test_nt_layout_ref)
             message(STATUS "profiler: hay cabeceras de referencia; la tabla de disposicion se contrasta")
+        elseif (VXP_DDK_REFERENCE)
+            message(STATUS "profiler: hay cabeceras de referencia en ${VXP_DDK_REFERENCE} pero ${CMAKE_C_COMPILER_ID} no las compila -- la tabla de disposicion NO se contrasta contra nada externo")
         else ()
             message(STATUS "profiler: sin cabeceras de referencia -- la tabla de disposicion NO se contrasta contra nada externo")
         endif ()
