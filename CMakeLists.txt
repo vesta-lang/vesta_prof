@@ -406,6 +406,7 @@ if (VXP_BUILD_TESTS)
                 common/isa/walk.c
                 common/isa/sweep.c
                 common/isa/queue.c
+                common/isa/ref.c
                 windows/isa_win.c
                 windows/isa_pool.c
                 windows/asm/x86_64/isa_trial.S)
@@ -438,7 +439,8 @@ if (VXP_BUILD_TESTS)
     # es lo que compra que el oraculo entre como tabla de operaciones en vez de
     # que el barrido sepa lo que es una pagina.
     add_executable(test_isa_sweep
-            tests/test_isa_sweep.c common/isa/walk.c common/isa/sweep.c)
+            tests/test_isa_sweep.c common/isa/walk.c common/isa/sweep.c
+            common/isa/ref.c)
     target_link_libraries(test_isa_sweep PRIVATE vxp_base)
     target_include_directories(test_isa_sweep PRIVATE common)
     set_target_properties(test_isa_sweep PROPERTIES

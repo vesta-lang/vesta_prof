@@ -614,6 +614,14 @@ static status raw_attempt_with(const isa_arena *a, const u8 *bytes, u32 n,
         candidate[i] = bytes[i];
     }
 
+    /* \~english ZEROING IT IS WHAT SAYS "NOBODY HAS ANSWERED", and it says so because
+     * `ISA_NOTHING` is zero -- see the enum in `trial.h` for the candidate that made that
+     * necessary.  There is nothing else to write here: if the flow never comes back to
+     * fill the result in, what the caller reads is the truth.  \~spanish PONERLO A CERO ES
+     * LO QUE DICE "NADIE HA RESPONDIDO", y lo dice porque `ISA_NOTHING` vale cero -- ver el
+     * enum de `trial.h` para la candidata que lo hizo necesario.  No hay nada mas que
+     * escribir aqui: si el flujo no vuelve a rellenar el resultado, lo que lea quien llama
+     * es la verdad. \~ */
     for (i = 0; i < sizeof(*out); ++i) {
         ((char *)out)[i] = 0;
     }

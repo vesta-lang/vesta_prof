@@ -67,6 +67,7 @@ static void check(int cond, const char *what) {
  *  \~spanish El nombre de un resultado, para un mensaje que se pueda leer. \~ */
 static const char *name_of(u32 outcome) {
     switch (outcome) {
+    case ISA_NOTHING: return "SIN RESPUESTA";
     case ISA_RAN: return "corrio";
     case ISA_TRUNCATED: return "le faltaban bytes";
     case ISA_INVALID: return "no existe";

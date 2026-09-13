@@ -162,12 +162,26 @@ int isa_queue_pop(isa_queue *q, isa_work *out);
 
 /**
  * @brief
- * \~english Fills it with the initial split of the whole first byte.
- * \~spanish La llena con el reparto inicial del primer byte entero.
+ * \~english Fills it with the split of one byte, under a prefix that stays put.
+ * \~spanish La llena con el reparto de un byte, bajo un prefijo que no se mueve.
  * \~
  *
- * @param chunk \~english how many first bytes per item; 1 gives 256 items \~spanish cuantos primeros bytes por trozo; 1 da 256 trozos \~
+ * @param prefix \~english the frozen head, or null when `fixed` is 0 \~spanish la cabeza congelada, o nulo cuando `fixed` es 0 \~
+ * @param fixed \~english how many bytes are frozen; 0 seeds the whole space \~spanish cuantos bytes se congelan; 0 siembra el espacio entero \~
+ * @param chunk \~english how many values per item; 1 gives 256 items \~spanish cuantos valores por trozo; 1 da 256 trozos \~
  * @return `OK`; `ERR_INVALID` \~english on a chunk or depth that makes no sense; `ERR_NOSPACE` if they do not fit \~spanish con un trozo o una profundidad sin sentido; `ERR_NOSPACE` si no caben \~
+ *
+ * \~english
+ * THE PREFIX IS WHAT MAKES A RUN AIMABLE.  With none, this seeds the whole
+ * instruction space -- which is what a sweep of the machine wants.  With one, it
+ * seeds a single subtree, and that is how somebody asks for the expensive, exhaustive
+ * treatment of the one region a cheap sweep flagged as worth it.
+ *
+ * \~spanish
+ * EL PREFIJO ES LO QUE PERMITE APUNTAR UNA CORRIDA.  Sin el, esto siembra el espacio
+ * de instrucciones entero -- que es lo que quiere un barrido de la maquina.  Con el,
+ * siembra un solo subarbol, y asi es como alguien pide el trato caro y exhaustivo de
+ * la unica region que un barrido barato senalo como interesante.
  *
  * \~english
  * THE CHUNK IS A TRADE AND NEITHER END IS FREE.  Big chunks mean fewer processes
@@ -182,7 +196,8 @@ int isa_queue_pop(isa_queue *q, isa_work *out);
  * casi nada con una muerte.  Dado que cerca de la mitad de los subarboles matan al
  * trabajador, lo pequeno es el lado por el que equivocarse.
  */
-status isa_queue_seed(isa_queue *q, u32 depth, u32 chunk);
+status isa_queue_seed(isa_queue *q, const u8 *prefix, u32 fixed, u32 depth,
+                      u32 chunk);
 
 /**
  * @brief

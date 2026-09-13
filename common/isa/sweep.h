@@ -59,6 +59,7 @@
 #ifndef VXP_COMMON_ISA_SWEEP_H
 #define VXP_COMMON_ISA_SWEEP_H
 
+#include "isa/ref.h"
 #include "isa/walk.h"
 
 /**
@@ -80,7 +81,7 @@
  * contaria en el cajon que venga detras, y un histograma que atribuye hallazgos
  * al veredicto equivocado sin decirlo es peor que uno que no compila.
  */
-#define ISA_OUTCOME_COUNT 8u
+#define ISA_OUTCOME_COUNT 9u
 
 /**
  * @brief
@@ -177,6 +178,29 @@ typedef struct isa_tally {
     u64 by_outcome[ISA_OUTCOME_COUNT];
     u64 by_length[ISA_MAX_LEN + 1u];      /**< \~english only where a length was measured \~spanish solo donde hubo longitud medida \~ */
     u64 truncated;                        /**< \~english no length: the decoder wanted more \~spanish sin longitud: el decodificador queria mas \~ */
+    /**
+     * \~english THE FOUR QUADRANTS, and they are the only numbers here that are
+     * findings rather than measurements.  Everything else says what the processor did;
+     * these say where it and somebody else's decoder disagree, which is the thing this
+     * whole tree was built to produce.
+     *
+     * They stay zero when no reference was given, which is not the same as agreeing --
+     * a run with nothing to compare against has no findings, and `agree == 0` with
+     * everything else zero is how that reads.
+     *
+     * \~spanish LOS CUATRO CUADRANTES, y son los unicos numeros de aqui que son
+     * hallazgos y no medidas.  Todo lo demas dice lo que hizo el procesador; estos
+     * dicen donde el y el decodificador de otra gente discrepan, que es lo que este
+     * arbol entero se construyo para producir.
+     *
+     * Se quedan a cero cuando no se dio referencia, que no es lo mismo que estar de
+     * acuerdo -- una corrida sin nada con lo que compararse no tiene hallazgos, y
+     * `agree == 0` con todo lo demas a cero es como se lee eso.
+     */
+    u64 agree;    /**< \~english both decode it, same length \~spanish los dos la decodifican, misma longitud \~ */
+    u64 conflict; /**< \~english both decode it, DIFFERENT length \~spanish los dos la decodifican, longitud DISTINTA \~ */
+    u64 only_cpu; /**< \~english the silicon has it, the reference does not \~spanish el silicio la tiene, la referencia no \~ */
+    u64 only_ref; /**< \~english the reference has it, this part does not \~spanish la referencia la tiene, esta pieza no \~ */
 } isa_tally;
 
 /**
@@ -202,6 +226,31 @@ typedef struct isa_tally {
  * completo despues de no haber medido nada.
  */
 status isa_sweep(const isa_probe_ops *ops, const isa_work *work,
-                 isa_tally *out);
+                 const isa_ref *ref, isa_tally *out);
+
+/**
+ * @brief
+ * \~english Puts one answer in one of the four quadrants.
+ * \~spanish Coloca una respuesta en uno de los cuatro cuadrantes.
+ * \~
+ *
+ * @param ref_len \~english what the reference says, 0 when it does not decode them \~spanish lo que dice la referencia, 0 cuando no los decodifica \~
+ *
+ * \~english
+ * IT IS PUBLIC BECAUSE TWO PLACES ASK IT, and the rule must not exist twice.  The sweep
+ * asks for every candidate in a subtree; the single-candidate path -- which cannot use
+ * the sweep, because it has to announce each attempt out loud -- asks for its one.  It
+ * had its own copy for exactly one run, and the copy was that there was none: the
+ * exhaustive mode reported 256 candidates tried and zero of every quadrant.
+ *
+ * \~spanish
+ * ES PUBLICA PORQUE LA PREGUNTAN DOS SITIOS, y la regla no debe existir dos veces.  El
+ * barrido la pregunta por cada candidata de un subarbol; el camino de una sola candidata
+ * -- que no puede usar el barrido, porque tiene que anunciar cada intento en voz alta --
+ * la pregunta por la suya.  Tuvo su propia copia durante exactamente una corrida, y la
+ * copia era que no habia ninguna: el modo exhaustivo informo de 256 candidatas probadas
+ * y cero de cada cuadrante.
+ */
+void isa_quadrant(isa_tally *t, const isa_result *r, u32 ref_len);
 
 #endif /* VXP_COMMON_ISA_SWEEP_H */

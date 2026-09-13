@@ -151,7 +151,7 @@ int main(void) {
         ops.ctx = &f;
         work_for(&work, 0x90u, 0x90u, 3u);
 
-        check(isa_sweep(&ops, &work, &t) == OK, "el barrido de 90 sale");
+        check(isa_sweep(&ops, &work, 0, &t) == OK, "el barrido de 90 sale");
         printf("  90 -> %llu probadas, %llu saltadas, %llu corrio\n",
                (unsigned long long)t.candidates, (unsigned long long)t.skipped,
                (unsigned long long)t.by_outcome[ISA_RAN]);
@@ -180,7 +180,7 @@ int main(void) {
         ops.ctx = &f;
         work_for(&work, 0x0Fu, 0x0Fu, 3u);
 
-        check(isa_sweep(&ops, &work, &t) == OK, "el barrido de 0F sale");
+        check(isa_sweep(&ops, &work, 0, &t) == OK, "el barrido de 0F sale");
         printf("  0F -> %llu probadas, %llu no existen\n",
                (unsigned long long)t.candidates,
                (unsigned long long)t.by_outcome[ISA_INVALID]);
@@ -212,7 +212,7 @@ int main(void) {
         ops.ctx = &f;
         work_for(&work, 0x66u, 0x66u, 3u);
 
-        check(isa_sweep(&ops, &work, &t) == OK, "el barrido de 66 sale");
+        check(isa_sweep(&ops, &work, 0, &t) == OK, "el barrido de 66 sale");
         printf("  66 -> %llu probadas, %llu cortas, %llu saltadas\n",
                (unsigned long long)t.candidates,
                (unsigned long long)t.truncated, (unsigned long long)t.skipped);
@@ -250,7 +250,7 @@ int main(void) {
         ops.ctx = &f;
         work_for(&work, 0x0Fu, 0x0Fu, 3u);
 
-        check(isa_sweep(&ops, &work, &t) == ERR_STATE,
+        check(isa_sweep(&ops, &work, 0, &t) == ERR_STATE,
               "el fallo del oraculo sale hacia arriba");
         printf("  paro con %llu probadas de las 256\n",
                (unsigned long long)t.candidates);
@@ -279,13 +279,14 @@ int main(void) {
         work_for(&work, 0x00u, 0xFFu, 3u);
         ops.measure = 0;
         ops.ctx = 0;
-        check(isa_sweep(&ops, &work, &t) == ERR_INVALID,
+        check(isa_sweep(&ops, &work, 0, &t) == ERR_INVALID,
               "una tabla sin funcion se rechaza");
 
         ops.measure = fake_measure;
-        check(isa_sweep(0, &work, &t) == ERR_INVALID, "sin tabla se rechaza");
-        check(isa_sweep(&ops, 0, &t) == ERR_INVALID, "sin trabajo se rechaza");
-        check(isa_sweep(&ops, &work, 0) == ERR_INVALID, "sin cuenta se rechaza");
+        check(isa_sweep(0, &work, 0, &t) == ERR_INVALID, "sin tabla se rechaza");
+        check(isa_sweep(&ops, 0, 0, &t) == ERR_INVALID, "sin trabajo se rechaza");
+        check(isa_sweep(&ops, &work, 0, 0) == ERR_INVALID,
+              "sin cuenta se rechaza");
 
         /* Un trabajo que no describe un subarbol tiene que salir por el mismo
          * sitio que en `isa_walk_open`, no colarse hasta el bucle. */
@@ -294,7 +295,7 @@ int main(void) {
             fake_oracle f;
             memset(&f, 0, sizeof(f));
             ops.ctx = &f;
-            check(isa_sweep(&ops, &work, &t) == ERR_INVALID,
+            check(isa_sweep(&ops, &work, 0, &t) == ERR_INVALID,
                   "un rango al reves se rechaza");
             check(f.asked == 0u, "y sin preguntarle nada al oraculo");
         }

@@ -31,20 +31,97 @@ De ahi salen cuatro cuadrantes, y dos son hallazgos:
     la tabla NO          HALLAZGO               de acuerdo
 ```
 
+Y un quinto que no esta en el cuadro y es el mas grave para un desensamblador: los
+dos la decodifican y dan **longitud distinta**. Una longitud equivocada desalinea
+todo lo que viene detras.
+
+### Lo que ha encontrado
+
+Contra Capstone, en el espacio de dos bytes: **23.410 de acuerdo, cero conflictos de
+longitud, 72 que el silicio ejecuta y el desensamblador no conoce** y 45 al reves.
+
+Los cero conflictos son tan importantes como los 72: si nuestro oraculo midiera mal
+las longitudes, contra un decodificador independiente saldrian miles.
+
+De los 72, **56 son los escapes de x87** (`DC`, `DD`, `DE`, `DF`). Los 16 de `DC` son
+`DC D0`..`DC DF`, comprobados uno a uno -- corren y miden 2:
+
+```text
+    DC D0    FCOM  ST(0)     sin documentar; la forma documentada es D8 D0
+    DC D8    FCOMP ST(0)     idem
+```
+
+Son alias no documentados: el mismo efecto por otra codificacion, que el silicio
+acepta desde siempre y los desensambladores no listan.
+
+Los 45 del otro cuadrante son formas que Capstone decodifica y **esta pieza** rechaza
+-- `8E` es `mov Sreg, r/m16` con selecciones de registro de segmento que no existen.
+
+## Dos modos, y se diferencian en lo que PROMETEN
+
+No es que uno sea una version rapida del otro. Afirman cosas distintas sobre un
+subarbol que mato a un trabajador:
+
+| | que dice de un subarbol letal | coste medido |
+| --- | --- | --- |
+| **caracterizador** (por defecto) | lo MUESTREA: se probaron 16 valores del byte siguiente y mataron N. No puede decir "estas son todas" | el espacio de 3 bytes entero en **41 s** y **256 procesos** |
+| **exhaustivo** (bajo peticion) | estrecha y NOMBRA cada candidata letal. Puede decir "estas son todas" | el subarbol de `C2` solo, unos **196.000 procesos** |
+
+El exhaustivo lleva un prefijo porque su sitio es una region concreta -- normalmente
+una que el caracterizador senalo. Con el prefijo vacio es el espacio entero, que es
+lo que cuesta la verdad completa y se mide en horas.
+
+**Por que los dos, y no es un apano.** La pregunta que le hace el compilador a esto
+es *"que toca esta instruccion"*, y `ret imm16` destruye el puntero de pila se
+responde UNA vez; 65.280 confirmaciones no le sirven a nadie. Pero el exhaustivo
+tiene que existir, porque es el unico que puede encontrar lo que nada describe: una
+instruccion indocumentada es por definicion una cuyo formato no se conoce, y
+muestrear por lo conocido se salta justo la region donde se esconde.
+
+O sea: **caracterizar para saber DONDE mirar, exhaustivo para mirar.**
+
 ## Como se usa
 
 ```bash
-vxp_fuzz                        # profundidad 3, 8 trabajadores, plazo 20 s
-vxp_fuzz <prof> <trab> <ms>     # los tres, a mano
-vxp_fuzz solo <prof> <lo> <hi>  # un barrido en ESTE proceso, para mirarlo
-vxp_fuzz worker <prof> <fijos> <lo> <hi> <prefijo-hex>
+vxp_fuzz                                              # caracteriza el espacio entero
+vxp_fuzz <prof> <trab> <ms> [ref]                     # los tres, y la referencia
+vxp_fuzz todo <prefijo-hex> [prof] [trab] [ms] [ref]  # exhaustivo bajo ese prefijo
+vxp_fuzz solo <prof> <lo> <hi> [ref]                  # un barrido en ESTE proceso
+vxp_fuzz worker <prof> <fijos> <lo> <hi> <prefijo-hex> [ref]
 ```
+
+La **referencia** es lo que hace que esto encuentre algo en vez de solo medir. Se
+precalcula una vez con un desensamblador ajeno y el barrido compara mientras corre:
+
+```bash
+python tools/gen_ref_x86.py 2 ref/x86-64-d2.bin
+vxp_fuzz 2 12 8000 ref/x86-64-d2.bin
+```
+
+La ruta viaja en la linea de ordenes y cada trabajador la carga. Las **sondas y los
+muestreos no la reciben**: a una sonda se le pregunta una cosa -- cuanto mide esto -- y
+comparar no es eso; a profundidad tres son la mayoria de los procesos y cargarian
+dieciseis megabytes para nada.
 
 Las dos ultimas formas existen para poder mirar a mano lo que el padre encuentra.
 Un trabajador se ejecuta suelto con los mismos argumentos que le pasaria el padre,
 y `solo` imprime el barrido en vez de devolverlo en crudo -- **muere con la primera
 candidata letal, que es justo para lo que sirve**: comprobar a mano una candidata
 que el padre nombro.
+
+Una corrida caracterizadora acaba diciendo donde apuntar la otra:
+
+```text
+  ZONA      FE   hasta 6   matan 0 de 16 probados, y hay 65536 candidatas
+  ...
+  92 zonas caracterizadas en vez de listadas
+  y en 70 de ellas el muestreo no encontro lo letal: piden `todo <prefijo>`
+```
+
+Una `ZONA` **no** es un hallazgo sobre esos bytes: es "algo de aqui dentro se llevo a
+un trabajador, y esto es cuantos de los valores muestreados lo hicieron". Un perfil
+de cero quiere decir que el muestreo no lo encontro -- que es una senal de donde
+mirar, no una afirmacion sobre `FE`.
 
 ## Los tres mecanismos, y como se valida cada uno
 

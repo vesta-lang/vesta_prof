@@ -71,13 +71,23 @@ int isa_queue_pop(isa_queue *q, isa_work *out) {
     return 1;
 }
 
-status isa_queue_seed(isa_queue *q, u32 depth, u32 chunk) {
+status isa_queue_seed(isa_queue *q, const u8 *prefix, u32 fixed, u32 depth,
+                      u32 chunk) {
     u32 lo;
 
     if (q == 0 || depth < 1u || depth > ISA_WALK_DEPTH_MAX) {
         return ERR_INVALID;
     }
     if (chunk < 1u || chunk > 256u) {
+        return ERR_INVALID;
+    }
+    /* \~english The same rule as opening a walk: freezing as many bytes as are
+     * enumerated leaves nothing to sweep.  \~spanish La misma regla que abrir un
+     * recorrido: congelar tantos bytes como se enumeran no deja nada que barrer. \~ */
+    if (fixed >= depth) {
+        return ERR_INVALID;
+    }
+    if (fixed != 0 && prefix == 0) {
         return ERR_INVALID;
     }
 
@@ -92,7 +102,10 @@ status isa_queue_seed(isa_queue *q, u32 depth, u32 chunk) {
         for (i = 0; i < ISA_MAX_LEN; ++i) {
             w.prefix[i] = 0;
         }
-        w.fixed = 0;
+        for (i = 0; i < fixed; ++i) {
+            w.prefix[i] = prefix[i];
+        }
+        w.fixed = (u8)fixed;
         w.lo = (u8)lo;
         w.hi = (u8)hi;
         w.depth = (u8)depth;

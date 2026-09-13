@@ -38,9 +38,21 @@
  *
  *      min(consumed, depth) - 1
  *
- * With `depth` 3 the `mov` above is answered once, by its opcode, and the four
- * bytes of immediate are never walked.  Raising `depth` costs 256 times more per
- * byte, so it is a knob and not a constant.
+ * WHAT IT DOES NOT DO, and the plainer version of this claimed otherwise: it caps
+ * how many bytes get enumerated, it does not stop OPERAND bytes from being among
+ * them.  With `depth` 3 the `mov` above is not answered once -- its opcode plus two
+ * bytes of immediate are three distinct candidates each, so 2^32 confirmations
+ * become 2^16 of them.  Measured on real silicon at depth three, two instructions
+ * that touch the stack pointer -- `enter imm16, imm8` and `ret imm16` -- accounted
+ * for 93% of everything the sweep reported.
+ *
+ * Telling an operand byte from an opcode byte needs to know the FORMAT, which is
+ * exactly what a blind sweep refuses to assume, so it cannot be fixed here.  Where
+ * it is dealt with is in whoever consumes a finding: the pool asks the processor
+ * whether such a byte decides anything before it enumerates 256 values of it.
+ *
+ * Raising `depth` costs 256 times more per byte, so it is a knob and not a
+ * constant.
  *
  * WHY IT TERMINATES, which is worth stating because "it eventually stops" is not
  * obvious for something that both moves forward and jumps backwards.  Read the
@@ -87,9 +99,21 @@
  *
  *      min(consumidos, depth) - 1
  *
- * Con `depth` 3 el `mov` de arriba queda respondido una vez, por su opcode, y
- * los cuatro bytes de inmediato no se recorren.  Subir `depth` cuesta 256 veces
- * mas por byte, asi que es un mando y no una constante.
+ * LO QUE NO HACE, y la version mas simple de esto afirmaba lo contrario: acota
+ * cuantos bytes se enumeran, no evita que entre ellos haya bytes de OPERANDO.  Con
+ * `depth` 3 el `mov` de arriba no queda respondido una vez -- su opcode mas dos
+ * bytes de inmediato son tres candidatas distintas cada una, asi que las 2^32
+ * confirmaciones se quedan en 2^16.  Medido sobre silicio de verdad a profundidad
+ * tres, dos instrucciones que tocan el puntero de pila -- `enter imm16, imm8` y
+ * `ret imm16` -- se llevaban el 93% de todo lo que informo el barrido.
+ *
+ * Distinguir un byte de operando de uno de opcode exige conocer el FORMATO, que es
+ * justo lo que un barrido a ciegas se niega a suponer, asi que no se puede arreglar
+ * aqui.  Donde se trata es en quien consume un hallazgo: el grupo de trabajadores le
+ * pregunta al procesador si tal byte decide algo antes de enumerar 256 valores de el.
+ *
+ * Subir `depth` cuesta 256 veces mas por byte, asi que es un mando y no una
+ * constante.
  *
  * POR QUE TERMINA, que merece decirse porque "al final para" no es evidente en
  * algo que avanza y a la vez salta hacia atras.  Leanse los primeros `depth`

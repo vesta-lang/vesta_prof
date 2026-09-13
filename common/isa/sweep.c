@@ -49,6 +49,10 @@ static void tally_clear(isa_tally *t) {
     t->candidates = 0;
     t->skipped = 0;
     t->truncated = 0;
+    t->agree = 0;
+    t->conflict = 0;
+    t->only_cpu = 0;
+    t->only_ref = 0;
     for (i = 0; i < ISA_OUTCOME_COUNT; ++i) {
         t->by_outcome[i] = 0;
     }
@@ -57,8 +61,99 @@ static void tally_clear(isa_tally *t) {
     }
 }
 
+/**
+ * @brief
+ * \~english Puts one candidate in one of the four quadrants.
+ * \~spanish Coloca una candidata en uno de los cuatro cuadrantes.
+ * \~
+ *
+ * \~english
+ * WHAT COUNTS AS "THE SILICON HAS IT", and getting this wrong would invent findings by
+ * the thousand.  `ISA_INVALID` is #UD: the processor says it does not know these bytes,
+ * so the answer is NO -- even though the sliding loop did measure how many bytes it
+ * consumed before saying so.  Everything else that decoded -- ran, privileged, faulted
+ * on memory, returned -- means the instruction EXISTS, whatever it then did.
+ *
+ * `ISA_TRUNCATED` is not compared at all: there is no answer at this length, so there
+ * is nothing to disagree with.
+ *
+ * \~spanish
+ * QUE CUENTA COMO "EL SILICIO LA TIENE", y equivocarse aqui inventaria hallazgos por
+ * miles.  `ISA_INVALID` es #UD: el procesador dice que no conoce estos bytes, asi que la
+ * respuesta es NO -- aunque el bucle deslizante si midiera cuantos bytes consumio antes
+ * de decirlo.  Todo lo demas que decodifico -- corrio, privilegiada, fallo en memoria,
+ * volvio -- quiere decir que la instruccion EXISTE, hiciera luego lo que hiciera.
+ *
+ * `ISA_TRUNCATED` no se compara: no hay respuesta a esta longitud, asi que no hay con
+ * que discrepar.
+ */
+void isa_quadrant(isa_tally *t, const isa_result *r, u32 ref_len) {
+    int cpu_has;
+    u32 cpu_len;
+
+    /* \~english Neither of these is a verdict: one says the instruction is longer than
+     * what was offered, the other that nobody answered at all.  \~spanish Ninguno de los
+     * dos es un veredicto: uno dice que la instruccion mide mas que lo que se ofrecio, el
+     * otro que nadie respondio en absoluto. \~ */
+    if (r->outcome == (u32)ISA_TRUNCATED || r->outcome == (u32)ISA_NOTHING) {
+        return;
+    }
+    cpu_has = (r->outcome != (u32)ISA_INVALID) ? 1 : 0;
+    cpu_len = r->length;
+
+    /*
+     * \~english NO LENGTH MEANS NO ANSWER, and that is the whole test -- not the outcome.
+     * A missing length is not "length zero": comparing it against a reference that says
+     * three produces a disagreement about nothing.
+     *
+     * It is not hypothetical.  `C2 60` is `ret 0x0060`, which returns to the landing label
+     * AND leaves the stack pointer 96 bytes high; the flow resumes elsewhere in our own
+     * code without faulting, so nobody fills the result in and it comes back as it was
+     * zeroed.  That single candidate was the only "length conflict" in 39.744 comparisons.
+     *
+     * WHAT THIS DOES NOT REJECT, and rejecting it cost 66 good comparisons before the test
+     * was narrowed to the length: an outcome of `ISA_UNKNOWN` that came from the
+     * CLASSIFIER.  That one means a real exception nobody could place -- and the length is
+     * perfectly good, because the sliding loop still stopped where it stopped.  The two
+     * look alike in the outcome and differ in exactly this field.
+     *
+     * \~spanish SIN LONGITUD NO HAY RESPUESTA, y esa es toda la prueba -- no el resultado.
+     * Una longitud que falta no es "longitud cero": compararla contra una referencia que
+     * dice tres produce un desacuerdo sobre nada.
+     *
+     * No es hipotetico.  `C2 60` es `ret 0x0060`, que vuelve a la etiqueta de aterrizaje Y
+     * deja el puntero de pila 96 bytes mas arriba; el flujo sigue en otro punto de nuestro
+     * propio codigo sin fallar, asi que nadie rellena el resultado y vuelve tal como se
+     * puso a cero.  Esa sola candidata fue el unico "conflicto de longitud" en 39.744
+     * comparaciones.
+     *
+     * LO QUE ESTO NO RECHAZA, y rechazarlo costo 66 comparaciones buenas antes de
+     * estrechar la prueba a la longitud: un resultado `ISA_UNKNOWN` que venga del
+     * CLASIFICADOR.  Ese quiere decir una excepcion de verdad que nadie supo colocar -- y
+     * la longitud es perfectamente buena, porque el bucle deslizante paro donde paro.  Los
+     * dos se parecen en el resultado y se diferencian exactamente en este campo.
+     */
+    if (cpu_has && cpu_len == 0) {
+        return;
+    }
+
+    if (cpu_has && ref_len != 0) {
+        if (cpu_len == ref_len) {
+            t->agree += 1u;
+        } else {
+            t->conflict += 1u;
+        }
+    } else if (cpu_has) {
+        t->only_cpu += 1u;
+    } else if (ref_len != 0) {
+        t->only_ref += 1u;
+    }
+    /* Ni el uno ni la otra: los dos dicen que no existe, y eso es un acuerdo que no
+     * hace falta contar -- lo que se busca son las discrepancias. */
+}
+
 status isa_sweep(const isa_probe_ops *ops, const isa_work *work,
-                 isa_tally *out) {
+                 const isa_ref *ref, isa_tally *out) {
     isa_walk w;
     status rc;
 
@@ -90,6 +185,9 @@ status isa_sweep(const isa_probe_ops *ops, const isa_work *work,
         out->candidates += 1u;
         if (r.outcome < ISA_OUTCOME_COUNT) {
             out->by_outcome[r.outcome] += 1u;
+        }
+        if (ref != 0) {
+            isa_quadrant(out, &r, isa_ref_length(ref, w.bytes));
         }
 
         /*

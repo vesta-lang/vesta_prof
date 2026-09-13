@@ -125,7 +125,7 @@ static u32 descend(u32 depth, u32 chunk, const u8 *deadly, u8 *named,
     const u32 limit = 64u * (u32)ISA_MAX_LEN;
 
     isa_queue_open(&q);
-    if (isa_queue_seed(&q, depth, chunk) != OK) {
+    if (isa_queue_seed(&q, 0, 0, depth, chunk) != OK) {
         check(0, what);
         return 0;
     }
@@ -179,7 +179,7 @@ int main(void) {
         u32 seen = 0;
 
         isa_queue_open(&q);
-        check(isa_queue_seed(&q, 3u, 1u) == OK, "siembra de uno en uno");
+        check(isa_queue_seed(&q, 0, 0, 3u, 1u) == OK, "siembra de uno en uno");
         check(q.count == 256u, "256 trozos, uno por primer byte");
         check(q.dropped == 0, "y ninguno perdido");
         while (isa_queue_pop(&q, &w)) {
@@ -192,16 +192,46 @@ int main(void) {
         check(seen == 256u, "y salen los 256");
 
         isa_queue_open(&q);
-        check(isa_queue_seed(&q, 3u, 16u) == OK, "siembra de 16 en 16");
+        check(isa_queue_seed(&q, 0, 0, 3u, 16u) == OK, "siembra de 16 en 16");
         check(q.count == 16u, "16 trozos de 16 bytes cada uno");
+
+        /* Y bajo un prefijo, que es como se apunta el modo exhaustivo a una region:
+         * los bytes congelados tienen que llegar a cada trozo. */
+        {
+            u8 pre[2];
+            isa_work under;
+            int all = 1;
+            pre[0] = 0x0Fu;
+            pre[1] = 0x38u;
+            isa_queue_open(&q);
+            check(isa_queue_seed(&q, pre, 2u, 3u, 1u) == OK,
+                  "siembra bajo 0F 38");
+            check(q.count == 256u, "256 trozos bajo el prefijo");
+            while (isa_queue_pop(&q, &under)) {
+                if (under.fixed != 2u || under.prefix[0] != 0x0Fu ||
+                    under.prefix[1] != 0x38u) {
+                    all = 0;
+                }
+            }
+            check(all, "y todos llevan el prefijo congelado");
+            /* Congelar tanto como la profundidad no deja nada que barrer, igual que
+             * al abrir un recorrido: tiene que salir error y no una cola a medias. */
+            isa_queue_open(&q);
+            check(isa_queue_seed(&q, pre, 2u, 2u, 1u) == ERR_INVALID,
+                  "congelar la profundidad entera se rechaza");
+            check(isa_queue_seed(&q, 0, 2u, 3u, 1u) == ERR_INVALID,
+                  "un prefijo nulo con fixed no nulo se rechaza");
+            check(q.count == 0, "y la cola sigue vacia");
+        }
 
         /* Errores de uso: un reparto sin sentido no puede salir OK y dejar la cola a
          * medias, porque eso es un barrido con un agujero del tamano de lo que
          * falte. */
         isa_queue_open(&q);
-        check(isa_queue_seed(&q, 0u, 1u) == ERR_INVALID, "profundidad cero");
-        check(isa_queue_seed(&q, 3u, 0u) == ERR_INVALID, "trozo cero");
-        check(isa_queue_seed(&q, 3u, 257u) == ERR_INVALID, "trozo mayor que 256");
+        check(isa_queue_seed(&q, 0, 0, 0u, 1u) == ERR_INVALID, "profundidad cero");
+        check(isa_queue_seed(&q, 0, 0, 3u, 0u) == ERR_INVALID, "trozo cero");
+        check(isa_queue_seed(&q, 0, 0, 3u, 257u) == ERR_INVALID,
+              "trozo mayor que 256");
         check(q.count == 0, "y la cola sigue vacia");
     }
 

@@ -172,24 +172,65 @@
  * el mismo codigo, el mismo tipo y la misma direccion.  Solo difiere el RIP.
  */
 typedef enum isa_outcome {
+    /**
+     * \~english NOBODY FILLED THIS IN, and zero is reserved for it on purpose.
+     *
+     * A result is zeroed before an attempt, so this is what a result says while nothing
+     * has answered.  It has to be its own value, and the reason is not tidiness: a
+     * candidate can leave the apparatus without anything faulting.  `C2 60` is
+     * `ret 0x0060` -- it returns to the landing label AND leaves the stack pointer 96
+     * bytes high, so the epilogue pops the saved registers from the wrong place and its
+     * final `ret` takes an address from an OLDER frame.  The flow does not crash: it
+     * reappears somewhere else in our own code, skipping everything that would have
+     * filled the result in.  Nothing faults, so the guard has nothing to catch.
+     *
+     * With `ISA_RAN` at zero, as it was, that came back looking like an instruction that
+     * decoded and ran with length zero -- and the contrast against a reference turned it
+     * into a length disagreement.  A finding invented out of a hijacked measurement, and
+     * the number had a good face on it.
+     *
+     * So zero means NOTHING, and every consumer must treat it as "no answer" rather than
+     * as a verdict.
+     *
+     * \~spanish NADIE RELLENO ESTO, y el cero se le reserva a proposito.
+     *
+     * Un resultado se pone a cero antes de un intento, asi que esto es lo que dice un
+     * resultado mientras nada ha respondido.  Tiene que ser un valor propio, y la razon no
+     * es el orden: una candidata puede irse del aparato sin que nada falle.  `C2 60` es
+     * `ret 0x0060` -- vuelve a la etiqueta de aterrizaje Y deja el puntero de pila 96
+     * bytes mas arriba, asi que el epilogo saca los registros guardados del sitio
+     * equivocado y su `ret` final coge una direccion de un marco ANTERIOR.  El flujo no se
+     * estrella: reaparece en otro punto de nuestro propio codigo, saltandose todo lo que
+     * habria rellenado el resultado.  Nada falla, asi que el guarda no tiene nada que
+     * capturar.
+     *
+     * Con `ISA_RAN` en cero, como estaba, eso volvia pareciendo una instruccion que
+     * decodifico y corrio con longitud cero -- y el contraste contra una referencia lo
+     * convirtio en un desacuerdo de longitud.  Un hallazgo inventado a partir de una
+     * medida secuestrada, y el numero tenia buena cara.
+     *
+     * Asi que el cero quiere decir NADA, y todo consumidor debe tratarlo como "sin
+     * respuesta" y no como un veredicto.
+     */
+    ISA_NOTHING = 0,
     /** \~english it decoded and ran; the length is what was placed
      *  \~spanish decodifico y corrio; la longitud es lo que se puso \~ */
-    ISA_RAN = 0,
+    ISA_RAN = 1,
     /** \~english the decoder needed bytes past the boundary
      *  \~spanish al decodificador le faltaban bytes pasada la frontera \~ */
-    ISA_TRUNCATED = 1,
+    ISA_TRUNCATED = 2,
     /** \~english the processor does not know these bytes (#UD)
      *  \~spanish el procesador no conoce estos bytes (#UD) \~ */
-    ISA_INVALID = 2,
+    ISA_INVALID = 3,
     /** \~english it exists but not at this privilege level (#GP)
      *  \~spanish existe, pero no en este nivel de privilegio (#GP) \~ */
-    ISA_PRIVILEGED = 3,
+    ISA_PRIVILEGED = 4,
     /** \~english it ran and touched memory it should not have
      *  \~spanish corrio y toco memoria que no debia \~ */
-    ISA_MEMORY_FAULT = 4,
+    ISA_MEMORY_FAULT = 5,
     /** \~english it ran and raised something arithmetic (divide by zero...)
      *  \~spanish corrio y levanto algo aritmetico (division por cero...) \~ */
-    ISA_ARITH = 5,
+    ISA_ARITH = 6,
     /**
      * \~english Something the classifier does not know how to place.
      *
@@ -205,7 +246,7 @@ typedef enum isa_outcome {
      * y esconderlo dentro de "invalida" tiraria justo los hallazgos para los que
      * existe esta herramienta.
      */
-    ISA_UNKNOWN = 6,
+    ISA_UNKNOWN = 7,
     /**
      * \~english It returned on its own, without any exception.
      *
@@ -219,7 +260,7 @@ typedef enum isa_outcome {
      * que salto de vuelta.  El estado de despues es fiable, pero la longitud NO
      * queda medida -- nada se cayo por el borde.
      */
-    ISA_RETURNED = 7
+    ISA_RETURNED = 8
 } isa_outcome;
 
 /**
