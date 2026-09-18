@@ -88,7 +88,42 @@ vxp_fuzz <prof> <trab> <ms> [ref]                     # los tres, y la referenci
 vxp_fuzz todo <prefijo-hex> [prof] [trab] [ms] [ref]  # exhaustivo bajo ese prefijo
 vxp_fuzz solo <prof> <lo> <hi> [ref]                  # un barrido en ESTE proceso
 vxp_fuzz worker <prof> <fijos> <lo> <hi> <prefijo-hex> [ref]
+vxp_fuzz efectos <candidata-hex> [mas candidatas...]  # QUE ESCRIBE, no si existe
 ```
+
+## Que ESCRIBE, que es lo que el compilador pregunta de verdad
+
+Un compilador que no vaya a tratar un bloque `asm` como una caja negra necesita saber
+que **toca** -- que registros, que banderas --, y eso es lo que guarda
+`include/analysis/facts/asm_bindings.h`. "Existe y mide tres bytes" no le permite a
+nadie reordenar nada a su alrededor.
+
+```text
+  vxp_fuzz efectos 90 4831C0 4889C8 4801C8 48FFC2 50
+
+  candidata        mide  escribe
+  90 00 00          1    nada
+  48 31 C0          3    r0=cte banderas=cte      xor rax, rax
+  48 89 C8          3    r0=dep                   mov rax, rcx
+  48 01 C8          3    r0=dep banderas=dep      add rax, rcx
+  48 FF C2          3    r2=dep banderas=dep      inc rdx
+  50 00 00          1    r4=cte                   push rax
+```
+
+**`nop` tiene que salir escribiendo NADA.** Si dice otra cosa, lo roto es la
+comparacion, no la instruccion. Y `cte` frente a `dep` sale de correrla DOS veces
+desde estados distintos: con uno solo, una que escribe cero y otra que copia un
+registro que vale cero se ven igual.
+
+Dos limites, los dos medidos:
+
+- **ve los registros generales y las banderas, nada mas.** Los alias de x87 salen
+  escribiendo `nada`, y es verdad -- tocan la pila de la FPU, que esto no observa.
+  "No escribe nada que se vea" es una cota util y no es "no escribe nada".
+- **corre en este proceso**, asi que una candidata letal se lo lleva. `0F CC` es
+  `bswap esp`. Se imprime antes de probarla, asi que una muerte la nombra. Y no lo
+  arregla un trabajador: los efectos salen del contexto de DESPUES de la corrida, y
+  ese muere con el proceso.
 
 La **referencia** es lo que hace que esto encuentre algo en vez de solo medir. Se
 precalcula una vez con un desensamblador ajeno y el barrido compara mientras corre:

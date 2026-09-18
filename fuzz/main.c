@@ -748,6 +748,145 @@ static int solo_main(u32 depth, u32 lo, u32 hi, const char *ref_path) {
 }
 
 /* -------------------------------------------------------------------------- */
+/*  Que ESCRIBE una candidata                                                 */
+/* -------------------------------------------------------------------------- */
+
+/** @brief
+ *  \~english The name of an effect, and `-` for the one that is not there.
+ *  \~spanish El nombre de un efecto, y `-` para el que no esta. \~ */
+static const char *effect_name(u32 e) {
+    switch (e) {
+    case ISA_EFFECT_CONSTANT: return "cte";
+    case ISA_EFFECT_DEPENDS: return "dep";
+    default: return "-";
+    }
+}
+
+/**
+ * @brief
+ * \~english What one candidate writes, which is what the compiler actually asks.
+ * \~spanish Que escribe una candidata, que es lo que pregunta el compilador de
+ *           verdad.
+ * \~
+ *
+ * \~english
+ * WHY THIS IS THE POINT OF THE WHOLE TREE, and not the list of which bytes decode.  A
+ * compiler that will not treat a block of assembly as a black box needs to know what it
+ * TOUCHES -- which registers, which flags -- and that is what
+ * `include/analysis/facts/asm_bindings.h` keeps.  "It exists and is three bytes long" does
+ * not let anybody reorder anything around it.
+ *
+ * TWO RUNS, BECAUSE ONE CANNOT TELL A CONSTANT FROM A COPY.  With a single input state, an
+ * instruction that writes zero and one that copies a register holding zero look exactly
+ * the same.  The apparatus runs it twice from states that differ in every register, and
+ * the difference between the two differences separates them.
+ *
+ * IT IS NOT PART OF THE SWEEP, and deliberately: two extra attempts per candidate over
+ * millions is not a cost worth paying to learn what a handful of interesting ones do.  The
+ * sweep says WHICH candidates deserve the question; this answers it.
+ *
+ * \~spanish
+ * POR QUE ESTO ES EL PUNTO DE TODO EL ARBOL, y no la lista de que bytes decodifican.  Un
+ * compilador que no vaya a tratar un bloque de ensamblador como una caja negra necesita
+ * saber que TOCA -- que registros, que banderas --, y eso es lo que guarda
+ * `include/analysis/facts/asm_bindings.h`.  "Existe y mide tres bytes" no le permite a
+ * nadie reordenar nada a su alrededor.
+ *
+ * DOS CORRIDAS, PORQUE UNA NO DISTINGUE UNA CONSTANTE DE UNA COPIA.  Con un solo estado de
+ * entrada, una instruccion que escribe cero y otra que copia un registro que vale cero se
+ * ven exactamente igual.  El aparato la corre dos veces desde estados que difieren en cada
+ * registro, y la diferencia entre las dos diferencias las separa.
+ *
+ * NO VA DENTRO DEL BARRIDO, y a proposito: dos intentos de mas por candidata sobre
+ * millones no es un precio que pagar para saber que hacen un punado de interesantes.  El
+ * barrido dice QUE candidatas merecen la pregunta; esto la responde.
+ *
+ * DOS LIMITES, Y LOS DOS MEDIDOS:
+ *
+ * LO QUE VE son los dieciseis registros generales y las banderas aritmeticas.  Nada mas.
+ * Los siete alias no documentados de x87 salen escribiendo NADA, y es verdad -- tocan la
+ * pila de la FPU, que esto no observa.  "No escribe nada que se vea" es una cota util y no
+ * es lo mismo que "no escribe nada", asi que se lee tal cual.  El estado extendido esta en
+ * el CONTEXT (los XMM si, los YMM y ZMM con su mascara de caracteristicas), y es
+ * fontaneria pendiente.
+ *
+ * Y CORRE EN ESTE PROCESO, asi que una candidata letal se lo lleva y con el las que
+ * quedaran del lote.  `0F CC` es `bswap esp`.  La candidata se imprime ANTES de probarla,
+ * de modo que una muerte la nombra, pero el resto hay que volver a pedirlo.
+ *
+ * Y eso no se arregla con un proceso trabajador: los efectos salen del CONTEXT de DESPUES
+ * de la corrida, y ese muere con el proceso.  Para la clase letal harian falta otro
+ * mecanismo de captura -- un manejador que reciba el contexto antes de desenrollar -- y esa
+ * es una decision del mecanismo, no de aqui.
+ */
+static int effects_main(const u8 *bytes, u32 count) {
+    isa_arena arena;
+    u32 c;
+
+    isa_quiet_death();
+    if (isa_arena_open(&arena) != OK) {
+        printf("la arena no abre\n");
+        return 1;
+    }
+
+    printf("  candidata        mide  escribe\n");
+    for (c = 0; c < count; ++c) {
+        const u8 *one = bytes + (size_t)c * ISA_MAX_LEN;
+        isa_result r;
+        isa_effects e;
+        u32 i;
+        int algo = 0;
+
+        printf("  ");
+        for (i = 0; i < 3u; ++i) {
+            printf("%02X ", (unsigned)one[i]);
+        }
+        printf("        ");
+        fflush(stdout);
+
+        if (isa_measure(&arena, one, &r) != OK) {
+            printf("el oraculo fallo\n");
+            continue;
+        }
+        if (r.outcome == (u32)ISA_TRUNCATED || r.length == 0) {
+            printf("-     sin longitud, no hay nada que preguntar\n");
+            continue;
+        }
+        printf("%2u    ", (unsigned)r.length);
+        fflush(stdout);
+
+        if (isa_effects_of(&arena, one, r.length, &e) != OK) {
+            printf("el aparato fallo\n");
+            continue;
+        }
+        /* \~english Inconsistency is a finding and not an error: a candidate that answers
+         * differently to the same question is exactly what a fuzzer looks for.
+         * \~spanish La inconsistencia es un hallazgo y no un error: una candidata que
+         * contesta distinto a la misma pregunta es justo lo que busca un fuzzer. \~ */
+        if (!e.consistent) {
+            printf("NO ES CONSISTENTE: las dos corridas no coinciden\n");
+            continue;
+        }
+        for (i = 0; i < ISA_GPR_COUNT; ++i) {
+            if ((e.wrote_gpr & (1u << i)) != 0) {
+                printf("r%u=%s ", i, effect_name((u32)e.gpr_effect[i]));
+                algo = 1;
+            }
+        }
+        if (e.flags_effect != (u32)ISA_EFFECT_NONE) {
+            printf("banderas=%s ", effect_name(e.flags_effect));
+            algo = 1;
+        }
+        if (!algo) {
+            printf("nada");
+        }
+        printf("\n");
+    }
+    isa_arena_close(&arena);
+    return 0;
+}
+
+/* -------------------------------------------------------------------------- */
 
 /** @brief
  *  \~english Reads a pair of hex digits.  Returns -1 on anything else.
@@ -825,6 +964,47 @@ int main(int argc, char **argv) {
             return 3;
         }
         return isa_worker_main(&w, (argc > 7) ? argv[7] : 0);
+    }
+
+    /*
+     * \~english SEVERAL CANDIDATES AT ONCE, because a finding is almost never one: the
+     * sweep flags a family -- sixteen undocumented x87 aliases, eight `pop`s -- and asking
+     * what each writes one process at a time would lose the only thing worth seeing, which
+     * is whether they behave alike.
+     *
+     * \~spanish VARIAS CANDIDATAS DE UNA VEZ, porque un hallazgo casi nunca es una: el
+     * barrido senala una familia -- dieciseis alias no documentados de x87, ocho `pop` -- y
+     * preguntar que escribe cada una de proceso en proceso perderia lo unico que merece
+     * verse, que es si se portan igual.
+     */
+    if (argc > 1 && strcmp(argv[1], "efectos") == 0) {
+        static u8 bytes[64 * ISA_MAX_LEN];
+        u32 count = 0;
+        int a;
+
+        for (a = 2; a < argc && count < 64u; ++a) {
+            const char *hex = argv[a];
+            size_t len = strlen(hex);
+            u32 i;
+            if ((len % 2u) != 0 || len / 2u > ISA_MAX_LEN || len == 0) {
+                printf("cada candidata son parejas de digitos hexadecimales\n");
+                return 2;
+            }
+            for (i = 0; i < len / 2u; ++i) {
+                int v = hex_pair(hex + 2u * i);
+                if (v < 0) {
+                    printf("cada candidata son parejas de digitos hexadecimales\n");
+                    return 2;
+                }
+                bytes[(size_t)count * ISA_MAX_LEN + i] = (u8)v;
+            }
+            count += 1u;
+        }
+        if (count == 0) {
+            printf("hace falta al menos una candidata\n");
+            return 2;
+        }
+        return effects_main(bytes, count);
     }
 
     if (argc > 1 && strcmp(argv[1], "solo") == 0) {
